@@ -7,10 +7,18 @@ from plyer import notification
 
 from backend.models import (
     init_tables, list_users, fetch_unnotified_inactive_events, mark_event_notified,
-    fetch_user_inactive_history, fetch_screenshots_for_user, fetch_recordings_for_user
+    fetch_user_inactive_history, fetch_screenshots_for_user, fetch_recordings_for_user,
+    list_admin_emails,  # <-- NEW
 )
 from backend.auth import login, admin_create_user
 from backend.config import ADMIN_BOOTSTRAP
+from backend.notify import send_email  # <-- NEW
+
+# OPTIONAL:
+try:
+    from backend.config import ALERT_RECIPIENTS
+except Exception:
+    ALERT_RECIPIENTS = []
 
 REFRESH_MS = 2000  # poll db every 2s
 
@@ -62,13 +70,36 @@ class AdminApp(tk.Tk):
             # toast for newly inactive events; mark them notified
             rows = fetch_unnotified_inactive_events()
             for r in rows:
-                msg = (f"{r['name']} ({r['username']}, {r['email']}, {r['department']}) "
+                msg = (f"{r['name']} (@{r['username']}, {r['email']}, {r['department']}) "
                        f"is INACTIVE at {r['occurred_at']} "
                        f"(active streak: {seconds_to_hhmmss(r['active_duration_seconds'])}).")
                 try:
                     notification.notify(title="User Inactive", message=msg, timeout=4)
                 except Exception:
                     pass
+
+                # === OPTIONAL EMAIL FALLBACK (admin side) ===
+                try:
+                    recipients = set()
+                    if r.get("email"):  # user email
+                        recipients.add(r["email"])
+                    for em in list_admin_emails():
+                        if em:
+                            recipients.add(em)
+                    if ADMIN_BOOTSTRAP.get("email"):
+                        recipients.add(ADMIN_BOOTSTRAP["email"])
+                    for extra in ALERT_RECIPIENTS:
+                        recipients.add(extra)
+
+                    if recipients:
+                        subject = f"[IdleTracker] {r['username']} inactive"
+                        body = (f"User {r['name']} (@{r['username']}, {r['email']}, {r['department']}) "
+                                f"became INACTIVE at {r['occurred_at']}. "
+                                f"Active streak before inactivity: {seconds_to_hhmmss(r['active_duration_seconds'])}.")
+                        send_email(list(recipients), subject=subject, body=body)
+                except Exception:
+                    pass
+
                 mark_event_notified(r["id"])
 
             # get current users (respect current search)
@@ -174,13 +205,6 @@ class AdminDashboardFrame(ttk.Frame):
 
     # ----- incremental update of cards (no flicker) -----
     def apply_user_delta(self, users):
-        """
-        Update cards incrementally instead of rebuilding everything:
-        - remove cards for users no longer present
-        - add new cards
-        - update labels for existing cards
-        - preserve layout (4 columns)
-        """
         existing_ids = set(self.user_cards.keys())
         new_ids = set(u["id"] for u in users)
 
@@ -220,7 +244,6 @@ class AdminDashboardFrame(ttk.Frame):
                 }
                 self.user_cards[uid] = info
             else:
-                # update only when changed
                 name_txt = u["name"] or ""
                 if info["lbl_name"]["text"] != name_txt:
                     info["lbl_name"]["text"] = name_txt
