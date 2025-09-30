@@ -1,20 +1,21 @@
 import os
 import webbrowser
 import tkinter as tk
-from tkinter import ttk, messagebox, filedialog
+from tkinter import ttk, messagebox
 from datetime import datetime
 from plyer import notification
 
 from backend.models import (
     init_tables, list_users, fetch_unnotified_inactive_events, mark_event_notified,
     fetch_user_inactive_history, fetch_screenshots_for_user, fetch_recordings_for_user,
-    list_admin_emails,  # <-- NEW
+    list_admin_emails,
+    # --- you must implement these in backend.models (simple SQL) ---
+    admin_update_user, admin_delete_user,
 )
 from backend.auth import login, admin_create_user
 from backend.config import ADMIN_BOOTSTRAP
-from backend.notify import send_email  # <-- NEW
+from backend.notify import send_email
 
-# OPTIONAL:
 try:
     from backend.config import ALERT_RECIPIENTS
 except Exception:
@@ -34,10 +35,8 @@ class AdminApp(tk.Tk):
         self.frames = {}
         for F in (AdminLoginFrame, AdminDashboardFrame):
             frame = F(self); self.frames[F.__name__] = frame
-
         self.show_frame("AdminLoginFrame")
 
-        # control auto refresh
         self._poll_job = None
         self.auto_refresh_enabled = False  # enable after login
 
@@ -55,10 +54,8 @@ class AdminApp(tk.Tk):
 
     def _schedule_poll(self):
         if self._poll_job:
-            try:
-                self.after_cancel(self._poll_job)
-            except Exception:
-                pass
+            try: self.after_cancel(self._poll_job)
+            except Exception: pass
         self._poll_job = self.after(REFRESH_MS, self._poll_new_inactive)
 
     def _poll_new_inactive(self):
@@ -67,7 +64,6 @@ class AdminApp(tk.Tk):
 
         updated_users = None
         try:
-            # toast for newly inactive events; mark them notified
             rows = fetch_unnotified_inactive_events()
             for r in rows:
                 msg = (f"{r['name']} (@{r['username']}, {r['email']}, {r['department']}) "
@@ -78,31 +74,24 @@ class AdminApp(tk.Tk):
                 except Exception:
                     pass
 
-                # === OPTIONAL EMAIL FALLBACK (admin side) ===
+                # Fan-out email (user + admins + extras)
                 try:
-                    recipients = set()
-                    if r.get("email"):  # user email
-                        recipients.add(r["email"])
-                    for em in list_admin_emails():
-                        if em:
-                            recipients.add(em)
+                    recipients = {r.get("email")}
+                    recipients.update(e for e in list_admin_emails() if e)
                     if ADMIN_BOOTSTRAP.get("email"):
                         recipients.add(ADMIN_BOOTSTRAP["email"])
-                    for extra in ALERT_RECIPIENTS:
-                        recipients.add(extra)
-
+                    recipients.update(ALERT_RECIPIENTS)
+                    recipients.discard(None)
                     if recipients:
-                        subject = f"[IdleTracker] {r['username']} inactive"
-                        body = (f"User {r['name']} (@{r['username']}, {r['email']}, {r['department']}) "
-                                f"became INACTIVE at {r['occurred_at']}. "
-                                f"Active streak before inactivity: {seconds_to_hhmmss(r['active_duration_seconds'])}.")
-                        send_email(list(recipients), subject=subject, body=body)
+                        send_email(
+                            list(recipients),
+                            subject=f"[IdleTracker] {r['username']} inactive",
+                            body=msg
+                        )
                 except Exception:
                     pass
-
                 mark_event_notified(r["id"])
 
-            # get current users (respect current search)
             dash = self.frames["AdminDashboardFrame"]
             search = dash.search_var.get().strip() or None
             updated_users = list_users(search=search)
@@ -142,25 +131,21 @@ class AdminDashboardFrame(ttk.Frame):
     def __init__(self, master):
         super().__init__(master, padding=12)
 
-        # top bar with search + create user
+        # top bar
         top = ttk.Frame(self); top.pack(fill="x")
         ttk.Label(top, text="Users", font=("Segoe UI", 14, "bold")).pack(side="left")
 
         self.search_var = tk.StringVar()
         sbox = ttk.Entry(top, textvariable=self.search_var, width=40)
         sbox.pack(side="left", padx=10)
-
-        # Debounce search typing (no constant reloads)
         self._search_job = None
         def on_search_change(*_):
-            if self._search_job:
-                self.after_cancel(self._search_job)
+            if self._search_job: self.after_cancel(self._search_job)
             self._search_job = self.after(300, self._do_search)
         self.search_var.trace_add("write", on_search_change)
 
         ttk.Button(top, text="Search now", command=self._do_search).pack(side="left")
         ttk.Button(top, text="Clear", command=self._clear_search).pack(side="left", padx=(4,0))
-
         ttk.Button(top, text="Create User", command=self.open_create_user).pack(side="right")
 
         # scrollable card area
@@ -174,20 +159,16 @@ class AdminDashboardFrame(ttk.Frame):
         self.canvas.pack(side="left", fill="both", expand=True)
         vscroll.pack(side="right", fill="y")
 
-        # track cards by user id for incremental updates
-        self.user_cards = {}  # user_id -> dict of widgets
-
-        # first load
+        self.user_cards = {}  # user_id -> widgets
         self._do_search()
 
-    # ----- search helpers -----
+    # search helpers
     def _do_search(self):
         search = self.search_var.get().strip() or None
         try:
             users = list_users(search=search)
         except Exception as e:
-            print("Search error:", e)
-            users = []
+            print("Search error:", e); users = []
         self.apply_user_delta(users)
 
     def _clear_search(self):
@@ -195,7 +176,6 @@ class AdminDashboardFrame(ttk.Frame):
         self._do_search()
 
     def open_create_user(self):
-        # Pause auto-refresh while modal is open
         self.master.auto_refresh_enabled = False
         try:
             CreateUserDialog(self).wait_window()
@@ -203,7 +183,7 @@ class AdminDashboardFrame(ttk.Frame):
             self.master.auto_refresh_enabled = True
         self._do_search()
 
-    # ----- incremental update of cards (no flicker) -----
+    # incremental apply
     def apply_user_delta(self, users):
         existing_ids = set(self.user_cards.keys())
         new_ids = set(u["id"] for u in users)
@@ -211,14 +191,11 @@ class AdminDashboardFrame(ttk.Frame):
         # remove missing
         for uid in existing_ids - new_ids:
             info = self.user_cards.pop(uid, None)
-            if info:
-                info["frame"].destroy()
+            if info: info["frame"].destroy()
 
-        # stable order
         cols = 4
         users_sorted = sorted(users, key=lambda x: (x.get("name") or "", x.get("username") or ""))
 
-        # upsert
         for idx, u in enumerate(users_sorted):
             uid = u["id"]
             info = self.user_cards.get(uid)
@@ -229,41 +206,37 @@ class AdminDashboardFrame(ttk.Frame):
                 lbl_dept = ttk.Label(frame, text=f"Dept: {u['department']}"); lbl_dept.pack(anchor="w")
                 lbl_status = ttk.Label(frame, text=f"Status: {u['status']}"); lbl_status.pack(anchor="w", pady=(4,0))
 
+                # action row: History | Media | Update | Delete
                 row2 = ttk.Frame(frame); row2.pack(fill="x", pady=(6,0))
                 ttk.Button(row2, text="History",
                            command=lambda uid=uid, uname=u["name"]: self.open_history(uid, uname)).pack(side="left")
                 ttk.Button(row2, text="Media",
-                           command=lambda uid=uid, uname=u["name"]: self.open_media(uid, uname)).pack(side="right")
+                           command=lambda uid=uid, uname=u["name"]: self.open_media(uid, uname)).pack(side="left", padx=4)
+                ttk.Button(row2, text="Update",
+                           command=lambda u=u: self.open_update_user(u)).pack(side="left", padx=4)
+                ttk.Button(row2, text="Delete",
+                           command=lambda uid=uid: self.delete_user(uid)).pack(side="right")
 
-                info = {
-                    "frame": frame,
-                    "lbl_name": lbl_name,
-                    "lbl_user": lbl_user,
-                    "lbl_dept": lbl_dept,
-                    "lbl_status": lbl_status,
-                }
+                info = {"frame": frame, "lbl_name": lbl_name, "lbl_user": lbl_user,
+                        "lbl_dept": lbl_dept, "lbl_status": lbl_status}
                 self.user_cards[uid] = info
             else:
-                name_txt = u["name"] or ""
-                if info["lbl_name"]["text"] != name_txt:
-                    info["lbl_name"]["text"] = name_txt
+                # small diffs only
+                if info["lbl_name"]["text"] != (u["name"] or ""): info["lbl_name"]["text"] = u["name"] or ""
                 user_txt = f"@{u['username']}"
-                if info["lbl_user"]["text"] != user_txt:
-                    info["lbl_user"]["text"] = user_txt
+                if info["lbl_user"]["text"] != user_txt: info["lbl_user"]["text"] = user_txt
                 dept_txt = f"Dept: {u['department']}"
-                if info["lbl_dept"]["text"] != dept_txt:
-                    info["lbl_dept"]["text"] = dept_txt
+                if info["lbl_dept"]["text"] != dept_txt: info["lbl_dept"]["text"] = dept_txt
                 status_txt = f"Status: {u['status']}"
-                if info["lbl_status"]["text"] != status_txt:
-                    info["lbl_status"]["text"] = status_txt
+                if info["lbl_status"]["text"] != status_txt: info["lbl_status"]["text"] = status_txt
 
             r, c = divmod(idx, cols)
-            info["frame"].grid(row=r, column=c, padx=8, pady=8, sticky="nsew")
+            self.user_cards[uid]["frame"].grid(row=r, column=c, padx=8, pady=8, sticky="nsew")
 
         for i in range(cols):
             self.cards_frame.grid_columnconfigure(i, weight=1)
 
-    # ----- dialogs -----
+    # dialogs
     def open_history(self, user_id, user_name):
         self.master.auto_refresh_enabled = False
         try:
@@ -280,6 +253,23 @@ class AdminDashboardFrame(ttk.Frame):
             self.master.auto_refresh_enabled = True
         self._do_search()
 
+    def open_update_user(self, urow):
+        self.master.auto_refresh_enabled = False
+        try:
+            UpdateUserDialog(self, urow).wait_window()
+        finally:
+            self.master.auto_refresh_enabled = True
+        self._do_search()
+
+    def delete_user(self, user_id):
+        if not messagebox.askyesno("Confirm", "Delete this user? This cannot be undone."):
+            return
+        try:
+            admin_delete_user(user_id)
+            self._do_search()
+        except Exception as e:
+            messagebox.showerror("Error", str(e))
+
 
 class CreateUserDialog(tk.Toplevel):
     def __init__(self, master):
@@ -288,15 +278,18 @@ class CreateUserDialog(tk.Toplevel):
         p = ttk.Frame(self, padding=12); p.pack(fill="both", expand=True)
         self.v_username = tk.StringVar(); self.v_name = tk.StringVar()
         self.v_dept = tk.StringVar(); self.v_email = tk.StringVar()
-        self.v_password = tk.StringVar(); self.v_shift = tk.StringVar(value="09:00:00")
+        self.v_password = tk.StringVar()
+        self.v_shift_start = tk.StringVar(value="09:00:00")
+        self.v_shift_end   = tk.StringVar(value="18:00:00")
 
         for label, var in [
             ("Username", self.v_username), ("Name", self.v_name), ("Department", self.v_dept),
-            ("Email", self.v_email), ("Password", self.v_password), ("Shift Start (HH:MM:SS)", self.v_shift),
+            ("Email", self.v_email), ("Password", self.v_password),
+            ("Shift Start (HH:MM:SS)", self.v_shift_start),
+            ("Shift End (HH:MM:SS)", self.v_shift_end),
         ]:
             ttk.Label(p, text=label).pack(anchor="w", pady=(6,0))
-            show = "*" if label=="Password" else None
-            ttk.Entry(p, textvariable=var, show=show).pack(fill="x")
+            ttk.Entry(p, textvariable=var, show="*" if label=="Password" else None).pack(fill="x")
 
         ttk.Button(p, text="Create", command=self.do_create).pack(pady=10)
 
@@ -308,9 +301,47 @@ class CreateUserDialog(tk.Toplevel):
                 self.v_dept.get().strip(),
                 self.v_email.get().strip(),
                 self.v_password.get().strip(),
-                shift_start_time=self.v_shift.get().strip() or "09:00:00",
+                shift_start_time=self.v_shift_start.get().strip() or "09:00:00",
+                shift_end_time=self.v_shift_end.get().strip() or "18:00:00",
             )
             messagebox.showinfo("Done", "User created")
+            self.destroy()
+        except Exception as e:
+            messagebox.showerror("Error", str(e))
+
+
+class UpdateUserDialog(tk.Toplevel):
+    def __init__(self, master, urow):
+        super().__init__(master)
+        self.title("Update User"); self.grab_set(); self.resizable(False, False)
+        p = ttk.Frame(self, padding=12); p.pack(fill="both", expand=True)
+
+        self.user_id = urow["id"]
+        self.v_name = tk.StringVar(value=urow.get("name") or "")
+        self.v_dept = tk.StringVar(value=urow.get("department") or "")
+        self.v_email = tk.StringVar(value=urow.get("email") or "")
+        self.v_shift_start = tk.StringVar(value=str(urow.get("shift_start_time")))
+        self.v_shift_end   = tk.StringVar(value=str(urow.get("shift_end_time") or "18:00:00"))
+
+        for label, var in [
+            ("Name", self.v_name), ("Department", self.v_dept), ("Email", self.v_email),
+            ("Shift Start (HH:MM:SS)", self.v_shift_start), ("Shift End (HH:MM:SS)", self.v_shift_end),
+        ]:
+            ttk.Label(p, text=label).pack(anchor="w", pady=(6,0))
+            ttk.Entry(p, textvariable=var).pack(fill="x")
+
+        ttk.Button(p, text="Save", command=self.do_save).pack(pady=10)
+
+    def do_save(self):
+        try:
+            admin_update_user(
+                self.user_id,
+                name=self.v_name.get().strip(),
+                department=self.v_dept.get().strip(),
+                email=self.v_email.get().strip(),
+                shift_start_time=self.v_shift_start.get().strip(),
+                shift_end_time=self.v_shift_end.get().strip(),
+            )
             self.destroy()
         except Exception as e:
             messagebox.showerror("Error", str(e))
@@ -322,7 +353,6 @@ class HistoryDialog(tk.Toplevel):
         self.title(f"Inactive History — {user_name}")
         self.resizable(True, True); self.geometry("900x480"); self.grab_set()
 
-        # date filter row
         filt = ttk.Frame(self); filt.pack(fill="x", padx=8, pady=8)
         self.v_start = tk.StringVar(); self.v_end = tk.StringVar()
         ttk.Label(filt, text="Start (YYYY-MM-DD)").pack(side="left")
@@ -365,7 +395,7 @@ class MediaDialog(tk.Toplevel):
 
         nb = ttk.Notebook(self); nb.pack(fill="both", expand=True)
 
-        # screenshots tab
+        # screenshots
         scr_tab = ttk.Frame(nb, padding=6); nb.add(scr_tab, text="Screenshots")
         cols1 = ("id","event_id","taken_at","mime","url")
         self.tree_scr = ttk.Treeview(scr_tab, columns=cols1, show="headings", height=10)
@@ -373,10 +403,10 @@ class MediaDialog(tk.Toplevel):
             self.tree_scr.heading(c, text=c)
             self.tree_scr.column(c, width=140, anchor="w")
         self.tree_scr.pack(fill="both", expand=True)
-        btn1 = ttk.Button(scr_tab, text="Open selected", command=self.open_selected_screenshot)
-        btn1.pack(pady=6, anchor="e")
+        ttk.Button(scr_tab, text="Open selected", command=self.open_selected_screenshot)\
+            .pack(pady=6, anchor="e")
 
-        # recordings tab
+        # recordings
         rec_tab = ttk.Frame(nb, padding=6); nb.add(rec_tab, text="Recordings")
         cols2 = ("id","event_id","recorded_at","duration","mime","url")
         self.tree_rec = ttk.Treeview(rec_tab, columns=cols2, show="headings", height=10)
@@ -384,10 +414,9 @@ class MediaDialog(tk.Toplevel):
             self.tree_rec.heading(c, text=c)
             self.tree_rec.column(c, width=160 if c!="duration" else 100, anchor="w")
         self.tree_rec.pack(fill="both", expand=True)
-        btn2 = ttk.Button(rec_tab, text="Open selected", command=self.open_selected_recording)
-        btn2.pack(pady=6, anchor="e")
+        ttk.Button(rec_tab, text="Open selected", command=self.open_selected_recording)\
+            .pack(pady=6, anchor="e")
 
-        # load data
         self.user_id = user_id
         self._reload_media()
 
@@ -403,21 +432,20 @@ class MediaDialog(tk.Toplevel):
         recs = fetch_recordings_for_user(self.user_id, limit=100)
         for r in recs:
             self.tree_rec.insert("", "end",
-                                 values=(r["id"], r["event_id"], str(r["recorded_at"]), r["duration_seconds"], r["mime"], r["url"]))
+                                 values=(r["id"], r["event_id"], str(r["recorded_at"]),
+                                         r["duration_seconds"], r["mime"], r["url"]))
 
     def open_selected_screenshot(self):
         sel = self.tree_scr.selection()
         if not sel:
-            messagebox.showinfo("Info", "Select a screenshot row.")
-            return
+            messagebox.showinfo("Info", "Select a screenshot row."); return
         url = self.tree_scr.item(sel[0])["values"][4]
         webbrowser.open(url)
 
     def open_selected_recording(self):
         sel = self.tree_rec.selection()
         if not sel:
-            messagebox.showinfo("Info", "Select a recording row.")
-            return
+            messagebox.showinfo("Info", "Select a recording row."); return
         url = self.tree_rec.item(sel[0])["values"][5]
         webbrowser.open(url)
 
