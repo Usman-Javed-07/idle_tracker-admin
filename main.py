@@ -1,16 +1,17 @@
 import os
+import sys
+import traceback
 import webbrowser
 import tkinter as tk
 from tkinter import ttk, messagebox
-from datetime import datetime
+from datetime import datetime, timedelta
 from plyer import notification
 
 from backend.models import (
     init_tables, list_users, fetch_unnotified_inactive_events, mark_event_notified,
     fetch_user_inactive_history, fetch_screenshots_for_user, fetch_recordings_for_user,
     list_admin_emails,
-    # --- you must implement these in backend.models (simple SQL) ---
-    admin_update_user, admin_delete_user,
+    admin_update_user, admin_delete_user, fetch_overtime_sum
 )
 from backend.auth import login, admin_create_user
 from backend.config import ADMIN_BOOTSTRAP
@@ -23,12 +24,17 @@ except Exception:
 
 REFRESH_MS = 2000  # poll db every 2s
 
+def seconds_to_hhmmss(sec):
+    if sec is None: return "00:00:00"
+    h = sec // 3600; m = (sec % 3600) // 60; s = sec % 60
+    return f"{int(h):02d}:{int(m):02d}:{int(s):02d}"
+
 
 class AdminApp(tk.Tk):
     def __init__(self):
         super().__init__()
         self.title("Admin Dashboard - Idle Tracker")
-        self.geometry("1100x720")
+        self.geometry("1180x760")
         self.resizable(True, True)
         init_tables()
 
@@ -39,6 +45,16 @@ class AdminApp(tk.Tk):
 
         self._poll_job = None
         self.auto_refresh_enabled = False  # enable after login
+
+        # center on screen
+        self.after(10, self._center_on_screen)
+
+    def _center_on_screen(self):
+        self.update_idletasks()
+        w = self.winfo_width(); h = self.winfo_height()
+        sw = self.winfo_screenwidth(); sh = self.winfo_screenheight()
+        x = (sw // 2) - (w // 2); y = (sh // 2) - (h // 2)
+        self.geometry(f"{w}x{h}+{x}+{y}")
 
     def show_frame(self, name):
         for f in self.frames.values(): f.pack_forget()
@@ -70,31 +86,30 @@ class AdminApp(tk.Tk):
                        f"is INACTIVE at {r['occurred_at']} "
                        f"(active streak: {seconds_to_hhmmss(r['active_duration_seconds'])}).")
                 try:
-                    notification.notify(title="User Inactive", message=msg, timeout=4)
+                    notification.notify(title="User Inactive", message=msg, timeout=4, app_name="Mars Capital")
                 except Exception:
                     pass
 
-                # Fan-out email (user + admins + extras)
                 try:
                     recipients = {r.get("email")}
                     recipients.update(e for e in list_admin_emails() if e)
-                    if ADMIN_BOOTSTRAP.get("email"):
-                        recipients.add(ADMIN_BOOTSTRAP["email"])
+                    if ADMIN_BOOTSTRAP.get("email"): recipients.add(ADMIN_BOOTSTRAP["email"])
                     recipients.update(ALERT_RECIPIENTS)
                     recipients.discard(None)
                     if recipients:
-                        send_email(
-                            list(recipients),
-                            subject=f"[IdleTracker] {r['username']} inactive",
-                            body=msg
-                        )
+                        send_email(list(recipients),
+                                   subject=f"[IdleTracker] {r['username']} inactive",
+                                   body=msg)
                 except Exception:
                     pass
+
                 mark_event_notified(r["id"])
 
             dash = self.frames["AdminDashboardFrame"]
-            search = dash.search_var.get().strip() or None
-            updated_users = list_users(search=search)
+            text = dash.search_var.get().strip() or None
+            st = dash.status_var.get().strip()
+            status = None if st == "Any" else st
+            updated_users = list_users(search=text, status=status, hide_admin=True)
         except Exception as e:
             print("Poll error:", e)
 
@@ -108,8 +123,8 @@ class AdminLoginFrame(ttk.Frame):
     def __init__(self, master):
         super().__init__(master, padding=16)
         ttk.Label(self, text="Admin Login", font=("Segoe UI", 16, "bold")).pack(pady=(0,12))
-        self.login_id = tk.StringVar(value=ADMIN_BOOTSTRAP["email"])
-        self.login_pwd = tk.StringVar(value=ADMIN_BOOTSTRAP["password"])
+        self.login_id = tk.StringVar(value=ADMIN_BOOTSTRAP.get("email",""))
+        self.login_pwd = tk.StringVar(value=ADMIN_BOOTSTRAP.get("password",""))
         ttk.Label(self, text="Username or Email").pack(anchor="w")
         ttk.Entry(self, textvariable=self.login_id).pack(fill="x")
         ttk.Label(self, text="Password").pack(anchor="w", pady=(8,0))
@@ -138,15 +153,27 @@ class AdminDashboardFrame(ttk.Frame):
         self.search_var = tk.StringVar()
         sbox = ttk.Entry(top, textvariable=self.search_var, width=40)
         sbox.pack(side="left", padx=10)
+
+        self.status_var = tk.StringVar(value="Any")
+        ttk.Label(top, text="Status:").pack(side="left", padx=(10,4))
+        cb = ttk.Combobox(top, textvariable=self.status_var, width=12,
+                          values=["Any","off","active","inactive"], state="readonly")
+        cb.pack(side="left")
+
         self._search_job = None
-        def on_search_change(*_):
+        def on_change(*_):
             if self._search_job: self.after_cancel(self._search_job)
             self._search_job = self.after(300, self._do_search)
-        self.search_var.trace_add("write", on_search_change)
+        self.search_var.trace_add("write", on_change)
+        self.status_var.trace_add("write", on_change)
 
-        ttk.Button(top, text="Search now", command=self._do_search).pack(side="left")
+        ttk.Button(top, text="Search now", command=self._do_search).pack(side="left", padx=(8,0))
         ttk.Button(top, text="Clear", command=self._clear_search).pack(side="left", padx=(4,0))
-        ttk.Button(top, text="Create User", command=self.open_create_user).pack(side="right")
+
+        # Logout button
+        ttk.Button(top, text="Logout", command=self._logout).pack(side="right")
+
+        ttk.Button(top, text="Create User", command=self.open_create_user).pack(side="right", padx=(0,8))
 
         # scrollable card area
         container = ttk.Frame(self); container.pack(fill="both", expand=True, pady=(10,0))
@@ -162,17 +189,24 @@ class AdminDashboardFrame(ttk.Frame):
         self.user_cards = {}  # user_id -> widgets
         self._do_search()
 
+    def _logout(self):
+        self.master.auto_refresh_enabled = False
+        self.master.show_frame("AdminLoginFrame")
+
     # search helpers
     def _do_search(self):
-        search = self.search_var.get().strip() or None
+        text = self.search_var.get().strip() or None
+        st = self.status_var.get().strip()
+        status = None if st == "Any" else st
         try:
-            users = list_users(search=search)
+            users = list_users(search=text, status=status, hide_admin=True)
         except Exception as e:
             print("Search error:", e); users = []
         self.apply_user_delta(users)
 
     def _clear_search(self):
         self.search_var.set("")
+        self.status_var.set("Any")
         self._do_search()
 
     def open_create_user(self):
@@ -351,40 +385,102 @@ class HistoryDialog(tk.Toplevel):
     def __init__(self, master, user_id, user_name):
         super().__init__(master)
         self.title(f"Inactive History — {user_name}")
-        self.resizable(True, True); self.geometry("900x480"); self.grab_set()
+        self.resizable(True, True); self.geometry("980x540"); self.grab_set()
 
+        self.user_id = user_id
+
+        # Filter row: Period + Start/End
         filt = ttk.Frame(self); filt.pack(fill="x", padx=8, pady=8)
-        self.v_start = tk.StringVar(); self.v_end = tk.StringVar()
+        self.v_period = tk.StringVar(value="Custom")
+        ttk.Label(filt, text="Period").pack(side="left")
+        ttk.Combobox(filt, textvariable=self.v_period, width=10,
+                     values=["Day","Week","Month","Custom"], state="readonly").pack(side="left", padx=(4,12))
+
+        self.v_start = tk.StringVar()
+        self.v_end = tk.StringVar()
         ttk.Label(filt, text="Start (YYYY-MM-DD)").pack(side="left")
         ttk.Entry(filt, textvariable=self.v_start, width=12).pack(side="left", padx=(4,10))
         ttk.Label(filt, text="End (YYYY-MM-DD)").pack(side="left")
         ttk.Entry(filt, textvariable=self.v_end, width=12).pack(side="left", padx=(4,10))
+
         ttk.Button(filt, text="Search", command=self.reload).pack(side="left")
         ttk.Button(filt, text="Clear", command=self.clear).pack(side="left", padx=(4,0))
 
-        cols = ("id","username","email","event","occurred_at","notified","active_duration")
+        # Totals strip (clean: no id/notified shown)
+        totals = ttk.Frame(self); totals.pack(fill="x", padx=8, pady=(0,8))
+        self.t_active = tk.StringVar(value="00:00:00")
+        self.t_inactive = tk.StringVar(value="00:00:00")
+        self.t_overtime = tk.StringVar(value="00:00:00")
+        def tot(label, var):
+            f = ttk.Frame(totals); f.pack(side="left", padx=16)
+            ttk.Label(f, text=label).pack()
+            ttk.Label(f, textvariable=var, font=("Consolas", 12, "bold")).pack()
+        tot("Total Active", self.t_active)
+        tot("Total Inactive (est.)", self.t_inactive)
+        tot("Total Overtime", self.t_overtime)
+
+        # Table
+        cols = ("username","email","event","occurred_at","active_duration")
         self.tree = ttk.Treeview(self, columns=cols, show="headings")
+        headers = {
+            "username":"username","email":"email","event":"event",
+            "occurred_at":"occurred_at","active_duration":"active_duration"
+        }
         for c in cols:
-            self.tree.heading(c, text=c)
-            self.tree.column(c, width=130 if c!="email" else 220, anchor="w")
+            self.tree.heading(c, text=headers[c])
+            self.tree.column(c, width=160 if c not in ("email","occurred_at") else 240, anchor="w")
         self.tree.pack(fill="both", expand=True)
 
-        self.user_id = user_id
         self.reload()
 
     def clear(self):
-        self.v_start.set(""); self.v_end.set(""); self.reload()
+        self.v_period.set("Custom")
+        self.v_start.set(""); self.v_end.set("")
+        self.reload()
+
+    def _compute_dates(self):
+        today = datetime.now().date()
+        p = self.v_period.get()
+        if p == "Day":
+            start = end = today
+        elif p == "Week":
+            start = today - timedelta(days=today.weekday())   # Monday
+            end = start + timedelta(days=6)
+        elif p == "Month":
+            start = today.replace(day=1)
+            if start.month == 12:
+                end = start.replace(year=start.year+1, month=1, day=1) - timedelta(days=1)
+            else:
+                end = start.replace(month=start.month+1, day=1) - timedelta(days=1)
+        else:
+            s = self.v_start.get().strip() or None
+            e = self.v_end.get().strip() or None
+            return (s, e)
+        return (str(start), str(end))
 
     def reload(self):
         for i in self.tree.get_children(): self.tree.delete(i)
-        start = self.v_start.get().strip() or None
-        end = self.v_end.get().strip() or None
-        rows = fetch_user_inactive_history(self.user_id, start, end, limit=500)
+
+        start, end = self._compute_dates()
+        rows = fetch_user_inactive_history(self.user_id, start, end, limit=1000)
+
+        total_active = 0
         for r in rows:
+            ad = int(r.get("active_duration_seconds") or 0)
+            total_active += ad
             self.tree.insert("", "end", values=(
-                r["id"], r["username"], r["email"], r["event_type"], str(r["occurred_at"]),
-                r["notified"], seconds_to_hhmmss(r["active_duration_seconds"] or 0)
+                r["username"], r["email"], r["event_type"], str(r["occurred_at"]),
+                seconds_to_hhmmss(ad)
             ))
+
+        self.t_active.set(seconds_to_hhmmss(total_active))
+
+        ot_sum = fetch_overtime_sum(self.user_id, start, end)
+        self.t_overtime.set(seconds_to_hhmmss(ot_sum))
+
+        INACTIVITY_THRESHOLD = 10
+        inactive_est = len(rows) * INACTIVITY_THRESHOLD
+        self.t_inactive.set(seconds_to_hhmmss(inactive_est))
 
 
 class MediaDialog(tk.Toplevel):
@@ -450,28 +546,21 @@ class MediaDialog(tk.Toplevel):
         webbrowser.open(url)
 
 
-def seconds_to_hhmmss(sec):
-    if sec is None: return "00:00:00"
-    h = sec // 3600; m = (sec % 3600) // 60; s = sec % 60
-    return f"{int(h):02d}:{int(m):02d}:{int(s):02d}"
-
-
+# -----------------------------
+# Launcher
+# -----------------------------
 if __name__ == "__main__":
-    import logging, sys, traceback
-    os.makedirs("logs", exist_ok=True)
-    logging.basicConfig(
-        filename=os.path.join("logs", "admin_app.log"),
-        level=logging.DEBUG, format="%(asctime)s | %(levelname)s | %(message)s"
-    )
     try:
         print("Starting AdminApp…")
         app = AdminApp()
-        app.after(50, lambda: (app.lift(), app.attributes("-topmost", True)))
-        app.after(1000, lambda: app.attributes("-topmost", False))
         app.mainloop()
     except Exception:
         tb = traceback.format_exc()
-        logging.error(tb)
-        print("Admin app crashed. See logs\\admin_app.log")
+        # log to console
         print(tb)
+        # and also show a message box so you don't miss it
+        try:
+            messagebox.showerror("Admin crashed", tb)
+        except Exception:
+            pass
         sys.exit(1)
