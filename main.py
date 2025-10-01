@@ -11,7 +11,7 @@ from backend.models import (
     init_tables, list_users, fetch_unnotified_inactive_events, mark_event_notified,
     fetch_user_inactive_history, fetch_screenshots_for_user, fetch_recordings_for_user,
     list_admin_emails,
-    admin_update_user, admin_delete_user, fetch_overtime_sum
+    admin_update_user, admin_delete_user, fetch_overtime_sum, get_user_by_id,
 )
 from backend.auth import login, admin_create_user
 from backend.config import ADMIN_BOOTSTRAP
@@ -326,7 +326,7 @@ class AdminDashboardFrame(ttk.Frame):
                 ttk.Button(row2, text="Media",
                            command=lambda uid=uid, uname=u["name"]: self.open_media(uid, uname)).pack(side="left", padx=4)
                 ttk.Button(row2, text="Update",
-                           command=lambda u=u: self.open_update_user(u)).pack(side="left", padx=4)
+                           command=lambda uid=uid: self.open_update_user(uid)).pack(side="left", padx=4)
                 ttk.Button(row2, text="Delete",
                            command=lambda uid=uid: self.delete_user(uid)).pack(side="right")
 
@@ -371,13 +371,18 @@ class AdminDashboardFrame(ttk.Frame):
             self.master.auto_refresh_enabled = True
         self._do_search()
 
-    def open_update_user(self, urow):
+    def open_update_user(self, user_id):
         self.master.auto_refresh_enabled = False
         try:
-            UpdateUserDialog(self, urow).wait_window()
+            fresh = get_user_by_id(user_id)   # always fetch the latest
+            if not fresh:
+               messagebox.showerror("Error", "User not found.")
+               return
+            UpdateUserDialog(self, fresh).wait_window()
         finally:
             self.master.auto_refresh_enabled = True
         self._do_search()
+
 
     def delete_user(self, user_id):
         if not messagebox.askyesno("Confirm", "Delete this user? This cannot be undone."):
