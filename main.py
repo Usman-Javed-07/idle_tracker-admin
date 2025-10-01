@@ -503,68 +503,113 @@ class CreateUserDialog(ctk.CTkToplevel):
         super().__init__(master)
         self.title("Create User")
         self.grab_set()
-        # allow resize so entries can stretch horizontally
         self.resizable(True, True)
         self.configure(fg_color=BAR_BG)
 
-        # wider default size + sensible minimums
-        self.geometry("200x330")     # <— increase width/height as you like
-        self.minsize(340, 530)
+        # Wider default size + guardrails
+        self.geometry("200x360")
+        self.minsize(340, 560)
 
         p = ctk.CTkFrame(self, corner_radius=12, fg_color=CARD_BG)
         p.pack(fill="both", expand=True, padx=16, pady=16)
-        p.configure(width=520)       # <— hint the inner frame to be wider
+        p.configure(width=720)
 
+        # --- variables ---
         self.v_username = tk.StringVar()
         self.v_name = tk.StringVar()
         self.v_dept = tk.StringVar()
         self.v_email = tk.StringVar()
         self.v_password = tk.StringVar()
+        self.v_password2 = tk.StringVar()  # NEW: confirm password
         self.v_shift_start = tk.StringVar(value="09:00:00")
         self.v_shift_end = tk.StringVar(value="18:00:00")
 
-        def row(label, var, is_pwd=False):
+        # keep entry widgets for highlighting/focus
+        self.inputs = {}
+
+        def row(label, var, key, is_pwd=False):
             ctk.CTkLabel(p, text=label).pack(anchor="w", pady=(6, 0))
-            ctk.CTkEntry(
+            e = ctk.CTkEntry(
                 p,
                 textvariable=var,
                 show="•" if is_pwd else None,
                 placeholder_text=label,
-                height=38
-            ).pack(fill="x")
+                height=38,
+            )
+            e.pack(fill="x")
+            self.inputs[key] = e
+            return e
 
-        row("Username", self.v_username)
-        row("Name", self.v_name)
-        row("Department", self.v_dept)
-        row("Email", self.v_email)
-        row("Password", self.v_password, is_pwd=True)
-        row("Shift Start (HH:MM:SS)", self.v_shift_start)
-        row("Shift End (HH:MM:SS)", self.v_shift_end)
+        row("Username", self.v_username, "username")
+        row("Name", self.v_name, "name")
+        row("Department", self.v_dept, "dept")
+        row("Email", self.v_email, "email")
+        row("Password", self.v_password, "password", is_pwd=True)
+        row("Confirm Password", self.v_password2, "password2", is_pwd=True)  # NEW field
+        row("Shift Start (HH:MM:SS)", self.v_shift_start, "shift_start")
+        row("Shift End (HH:MM:SS)", self.v_shift_end, "shift_end")
 
         ctk.CTkButton(p, text="Create", command=self.do_create, height=40).pack(pady=12, fill="x")
 
-        # center after geometry is applied
         self.after(10, self._center)
 
     def _center(self):
         self.update_idletasks()
         w, h = self.winfo_width(), self.winfo_height()
         sw, sh = self.winfo_screenwidth(), self.winfo_screenheight()
-        x = (sw // 2) - (w // 2)
-        y = (sh // 2) - (h // 2)
-        # keep current width/height; just move to center
-        self.geometry(f"{w}x{h}+{x}+{y}")
+        self.geometry(f"{w}x{h}+{(sw//2 - w//2)}+{(sh//2 - h//2)}")
+
+    # highlight helper
+    def _mark_error(self, entry: ctk.CTkEntry):
+        try:
+            entry.configure(border_color="#ef4444", border_width=2)
+            self.after(1500, lambda: entry.configure(border_color="transparent", border_width=1))
+        except Exception:
+            pass
 
     def do_create(self):
+        # Trimmed values
+        vals = {
+            "username": (self.v_username.get().strip(), "Username"),
+            "name": (self.v_name.get().strip(), "Name"),
+            "dept": (self.v_dept.get().strip(), "Department"),
+            "email": (self.v_email.get().strip(), "Email"),
+            "password": (self.v_password.get().strip(), "Password"),
+            "password2": (self.v_password2.get().strip(), "Confirm Password"),
+            "shift_start": (self.v_shift_start.get().strip(), "Shift Start (HH:MM:SS)"),
+            "shift_end": (self.v_shift_end.get().strip(), "Shift End (HH:MM:SS)"),
+        }
+
+        # 1) required fields
+        missing_keys = [k for k, (v, _) in vals.items() if not v]
+        if missing_keys:
+            for i, k in enumerate(missing_keys):
+                self._mark_error(self.inputs[k])
+                if i == 0:
+                    try: self.inputs[k].focus_set()
+                    except Exception: pass
+            missing_labels = ", ".join(vals[k][1] for k in missing_keys)
+            messagebox.showerror("Validation", f"All fields are required. Please fill: {missing_labels}")
+            return
+
+        # 2) passwords must match
+        if vals["password"][0] != vals["password2"][0]:
+            self._mark_error(self.inputs["password"])
+            self._mark_error(self.inputs["password2"])
+            try: self.inputs["password"].focus_set()
+            except Exception: pass
+            messagebox.showerror("Validation", "Passwords do not match.")
+            return
+
         try:
             admin_create_user(
-                self.v_username.get().strip(),
-                self.v_name.get().strip(),
-                self.v_dept.get().strip(),
-                self.v_email.get().strip(),
-                self.v_password.get().strip(),
-                shift_start_time=self.v_shift_start.get().strip() or "09:00:00",
-                shift_end_time=self.v_shift_end.get().strip() or "18:00:00",
+                vals["username"][0],
+                vals["name"][0],
+                vals["dept"][0],
+                vals["email"][0],
+                vals["password"][0],  # send the actual password
+                shift_start_time=vals["shift_start"][0],
+                shift_end_time=vals["shift_end"][0],
             )
             messagebox.showinfo("Done", "User created")
             self.destroy()
