@@ -206,8 +206,8 @@ class AdminLoginFrame(ctk.CTkFrame):
 
         ctk.CTkLabel(card, text="Admin Login", font=ctk.CTkFont(size=22, weight="bold")).pack(pady=(18, 6))
 
-        self.login_id = tk.StringVar(value=ADMIN_BOOTSTRAP.get("email", ""))
-        self.login_pwd = tk.StringVar(value=ADMIN_BOOTSTRAP.get("password", ""))
+        self.login_id = tk.StringVar(value="")
+        self.login_pwd = tk.StringVar(value="")
 
         form = ctk.CTkFrame(card, fg_color="transparent")
         form.pack(fill="x", padx=20, pady=8)
