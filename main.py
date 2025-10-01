@@ -503,11 +503,17 @@ class CreateUserDialog(ctk.CTkToplevel):
         super().__init__(master)
         self.title("Create User")
         self.grab_set()
-        self.resizable(False, False)
+        # allow resize so entries can stretch horizontally
+        self.resizable(True, True)
         self.configure(fg_color=BAR_BG)
 
+        # wider default size + sensible minimums
+        self.geometry("200x330")     # <— increase width/height as you like
+        self.minsize(340, 530)
+
         p = ctk.CTkFrame(self, corner_radius=12, fg_color=CARD_BG)
-        p.pack(fill="both", expand=True, padx=12, pady=12)
+        p.pack(fill="both", expand=True, padx=16, pady=16)
+        p.configure(width=520)       # <— hint the inner frame to be wider
 
         self.v_username = tk.StringVar()
         self.v_name = tk.StringVar()
@@ -519,7 +525,13 @@ class CreateUserDialog(ctk.CTkToplevel):
 
         def row(label, var, is_pwd=False):
             ctk.CTkLabel(p, text=label).pack(anchor="w", pady=(6, 0))
-            ctk.CTkEntry(p, textvariable=var, show="•" if is_pwd else None, placeholder_text=label).pack(fill="x")
+            ctk.CTkEntry(
+                p,
+                textvariable=var,
+                show="•" if is_pwd else None,
+                placeholder_text=label,
+                height=38
+            ).pack(fill="x")
 
         row("Username", self.v_username)
         row("Name", self.v_name)
@@ -529,7 +541,19 @@ class CreateUserDialog(ctk.CTkToplevel):
         row("Shift Start (HH:MM:SS)", self.v_shift_start)
         row("Shift End (HH:MM:SS)", self.v_shift_end)
 
-        ctk.CTkButton(p, text="Create", command=self.do_create).pack(pady=10)
+        ctk.CTkButton(p, text="Create", command=self.do_create, height=40).pack(pady=12, fill="x")
+
+        # center after geometry is applied
+        self.after(10, self._center)
+
+    def _center(self):
+        self.update_idletasks()
+        w, h = self.winfo_width(), self.winfo_height()
+        sw, sh = self.winfo_screenwidth(), self.winfo_screenheight()
+        x = (sw // 2) - (w // 2)
+        y = (sh // 2) - (h // 2)
+        # keep current width/height; just move to center
+        self.geometry(f"{w}x{h}+{x}+{y}")
 
     def do_create(self):
         try:
@@ -553,11 +577,17 @@ class UpdateUserDialog(ctk.CTkToplevel):
         super().__init__(master)
         self.title("Update User")
         self.grab_set()
-        self.resizable(False, False)
+        # allow resize so entries can stretch horizontally
+        self.resizable(True, True)
         self.configure(fg_color=BAR_BG)
 
+        # wider default size + sensible minimums
+        self.geometry("200x350")     # <— increase width/height as you like
+        self.minsize(340, 560)
+
         p = ctk.CTkFrame(self, corner_radius=12, fg_color=CARD_BG)
-        p.pack(fill="both", expand=True, padx=12, pady=12)
+        p.pack(fill="both", expand=True, padx=16, pady=16)
+        p.configure(width=740)       # <— hint the inner frame to be wider
 
         self.user_id = urow["id"]
         self.v_name = tk.StringVar(value=urow.get("name") or "")
@@ -571,7 +601,13 @@ class UpdateUserDialog(ctk.CTkToplevel):
 
         def row(label, var, is_pwd=False):
             ctk.CTkLabel(p, text=label).pack(anchor="w", pady=(6, 0))
-            ctk.CTkEntry(p, textvariable=var, show="•" if is_pwd else None, placeholder_text=label).pack(fill="x")
+            ctk.CTkEntry(
+                p,
+                textvariable=var,
+                show="•" if is_pwd else None,
+                placeholder_text=label,
+                height=38
+            ).pack(fill="x")
 
         row("Name", self.v_name)
         row("Department", self.v_dept)
@@ -579,12 +615,25 @@ class UpdateUserDialog(ctk.CTkToplevel):
         row("Username", self.v_username)
         row("Shift Start (HH:MM:SS)", self.v_shift_start)
         row("Shift End (HH:MM:SS)", self.v_shift_end)
-        ctk.CTkLabel(p, text="New Password (leave blank to keep)").pack(anchor="w", pady=(10, 0))
-        ctk.CTkEntry(p, textvariable=self.v_pass1, show="•", placeholder_text="New Password").pack(fill="x")
-        ctk.CTkLabel(p, text="Confirm Password").pack(anchor="w", pady=(6, 0))
-        ctk.CTkEntry(p, textvariable=self.v_pass2, show="•", placeholder_text="Confirm Password").pack(fill="x")
 
-        ctk.CTkButton(p, text="Save", command=self.do_save).pack(pady=12)
+        ctk.CTkLabel(p, text="New Password (leave blank to keep)").pack(anchor="w", pady=(10, 0))
+        ctk.CTkEntry(p, textvariable=self.v_pass1, show="•", placeholder_text="New Password", height=38).pack(fill="x")
+        ctk.CTkLabel(p, text="Confirm Password").pack(anchor="w", pady=(6, 0))
+        ctk.CTkEntry(p, textvariable=self.v_pass2, show="•", placeholder_text="Confirm Password", height=38).pack(fill="x")
+
+        ctk.CTkButton(p, text="Save", command=self.do_save, height=40).pack(pady=12, fill="x")
+
+        # center after geometry is applied
+        self.after(10, self._center)
+
+    def _center(self):
+        self.update_idletasks()
+        w, h = self.winfo_width(), self.winfo_height()
+        sw, sh = self.winfo_screenwidth(), self.winfo_screenheight()
+        x = (sw // 2) - (w // 2)
+        y = (sh // 2) - (h // 2)
+        # keep current width/height; just move to center
+        self.geometry(f"{w}x{h}+{x}+{y}")
 
     def do_save(self):
         try:
