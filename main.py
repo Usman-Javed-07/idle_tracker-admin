@@ -13,7 +13,7 @@ from backend.models import (
     list_admin_emails,
     admin_update_user, admin_delete_user, fetch_overtime_sum, get_user_by_id,
 )
-from backend.auth import login, admin_create_user
+from backend.auth import login, admin_create_user, hash_password
 from backend.config import ADMIN_BOOTSTRAP
 from backend.notify import send_email
 
@@ -453,36 +453,76 @@ class UpdateUserDialog(tk.Toplevel):
         self.v_name = tk.StringVar(value=urow.get("name") or "")
         self.v_dept = tk.StringVar(value=urow.get("department") or "")
         self.v_email = tk.StringVar(value=urow.get("email") or "")
-        self.v_shift_start = tk.StringVar(
-            value=str(urow.get("shift_start_time")))
-        self.v_shift_end = tk.StringVar(
-            value=str(urow.get("shift_end_time") or "18:00:00"))
+        self.v_username = tk.StringVar(value=urow.get("username") or "")
+        self.v_shift_start = tk.StringVar(value=str(urow.get("shift_start_time") or "09:00:00"))
+        self.v_shift_end = tk.StringVar(value=str(urow.get("shift_end_time") or "18:00:00"))
+
+        # Password fields are optional; only used if filled
+        self.v_pass1 = tk.StringVar(value="")
+        self.v_pass2 = tk.StringVar(value="")
 
         for label, var in [
-            ("Name", self.v_name), ("Department",
-                                    self.v_dept), ("Email", self.v_email),
-            ("Shift Start (HH:MM:SS)",
-             self.v_shift_start), ("Shift End (HH:MM:SS)", self.v_shift_end),
+            ("Name", self.v_name),
+            ("Department", self.v_dept),
+            ("Email", self.v_email),
+            ("Username", self.v_username),
+            ("Shift Start (HH:MM:SS)", self.v_shift_start),
+            ("Shift End (HH:MM:SS)", self.v_shift_end),
         ]:
             ttk.Label(p, text=label).pack(anchor="w", pady=(6, 0))
             ttk.Entry(p, textvariable=var).pack(fill="x")
 
-        ttk.Button(p, text="Save", command=self.do_save).pack(pady=10)
+        # New Password (optional)
+        ttk.Label(p, text="New Password (leave blank to keep)").pack(anchor="w", pady=(10, 0))
+        ttk.Entry(p, textvariable=self.v_pass1, show="*").pack(fill="x")
+
+        ttk.Label(p, text="Confirm Password").pack(anchor="w", pady=(6, 0))
+        ttk.Entry(p, textvariable=self.v_pass2, show="*").pack(fill="x")
+
+        ttk.Button(p, text="Save", command=self.do_save).pack(pady=12)
 
     def do_save(self):
         try:
-            admin_update_user(
-                self.user_id,
-                name=self.v_name.get().strip(),
-                department=self.v_dept.get().strip(),
-                email=self.v_email.get().strip(),
-                shift_start_time=self.v_shift_start.get().strip(),
-                shift_end_time=self.v_shift_end.get().strip(),
-            )
-            self.destroy()
-        except Exception as e:
-            messagebox.showerror("Error", str(e))
+            name = self.v_name.get().strip()
+            dept = self.v_dept.get().strip()
+            email = self.v_email.get().strip()
+            username = self.v_username.get().strip()
+            shift_start = self.v_shift_start.get().strip()
+            shift_end = self.v_shift_end.get().strip()
+            p1 = (self.v_pass1.get() or "").strip()
+            p2 = (self.v_pass2.get() or "").strip()
 
+            # Basic validation
+            if not username:
+                messagebox.showerror("Validation", "Username cannot be empty.")
+                return
+            if p1 or p2:
+                if p1 != p2:
+                    messagebox.showerror("Validation", "Passwords do not match.")
+                    return
+                if len(p1) < 6:
+                    messagebox.showerror("Validation", "Password must be at least 6 characters.")
+                    return
+
+            # Build payload (only include password_hash if user typed a new one)
+            payload = dict(
+                name=name,
+                department=dept,
+                email=email,
+                username=username,
+                shift_start_time=shift_start,
+                shift_end_time=shift_end,
+            )
+            if p1:
+                payload["password_hash"] = hash_password(p1)
+
+            admin_update_user(self.user_id, **payload)
+            messagebox.showinfo("Success", "User updated successfully.")
+            self.destroy()
+
+        except Exception as e:
+            # e.g., duplicate username/email constraint violations will land here
+            messagebox.showerror("Error", str(e))
 
 class HistoryDialog(tk.Toplevel):
     def __init__(self, master, user_id, user_name):
