@@ -25,9 +25,9 @@ try:
 except Exception:
     ALERT_RECIPIENTS = []
 
-REFRESH_MS = 2000  # poll db every 2s
+REFRESH_MS = 2000
 
-# ---- Branding / Colors ----
+# Colors
 APP_NAME = "Mars Capital"
 APP_AUMID = "Mars Capital"
 APP_ICON = os.path.join(os.getcwd(), "assets", "mars.ico")
@@ -35,12 +35,12 @@ if not os.path.isfile(APP_ICON):
     APP_ICON = None
 
 # Theme
-ctk.set_appearance_mode("System")       # "Dark" | "Light" | "System"
-ctk.set_default_color_theme("blue")     # "blue" | "green" | "dark-blue"
+ctk.set_appearance_mode("System")
+ctk.set_default_color_theme("blue")
 
-APP_BG = ("#f5f7fb", "#0f1115")         # main window background
-BAR_BG = ("#ffffff", "#151922")         # navbar & footer
-SIDEBAR_BG = ("#eef2f7", "#0f1624")     # sidebar bg (different)
+APP_BG = ("#f5f7fb", "#0f1115")
+BAR_BG = ("#ffffff", "#151922")
+SIDEBAR_BG = ("#eef2f7", "#0f1624")
 CARD_BG = ("#ffffff", "#1b2030")
 MUTED_TX = ("#6b7280", "#9aa4b2")
 
@@ -48,20 +48,22 @@ TOTAL_ACTIVE_COLOR = "#22c55e"
 TOTAL_INACTIVE_COLOR = "#ef4444"
 TOTAL_OVERTIME_COLOR = "#3b82f6"
 
-INACTIVE_ROW_BG = "#fee2e2"  # light red row bg for inactive events
+INACTIVE_ROW_BG = "#fee2e2"
 
 # Set AppUserModelID (Windows) so toasts won’t say "Python"
 if sys.platform.startswith("win"):
     try:
         import ctypes
-        ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(APP_AUMID)
+        ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(
+            APP_AUMID)
     except Exception:
         pass
 
 
 def admin_notify(title, message, timeout=5):
     try:
-        kw = {"title": title, "message": message, "timeout": timeout, "app_name": APP_NAME}
+        kw = {"title": title, "message": message,
+              "timeout": timeout, "app_name": APP_NAME}
         if APP_ICON:
             kw["app_icon"] = APP_ICON
         notification.notify(**kw)
@@ -77,10 +79,9 @@ def seconds_to_hhmmss(sec):
     s = sec % 60
     return f"{int(h):02d}:{int(m):02d}:{int(s):02d}"
 
-
-# =============================
 # Main Application (CustomTk)
-# =============================
+
+
 class AdminApp(ctk.CTk):
     def __init__(self):
         super().__init__()
@@ -105,7 +106,7 @@ class AdminApp(ctk.CTk):
         self.show_frame("AdminLoginFrame")
 
         self._poll_job = None
-        self.auto_refresh_enabled = False  # enable after login
+        self.auto_refresh_enabled = False
 
         # center on screen
         self.after(10, self._center_on_screen)
@@ -131,7 +132,8 @@ class AdminApp(ctk.CTk):
             return
         self.admin_user = admin_user
         dash = self.frames["AdminDashboardFrame"]
-        dash.set_admin_name(self.admin_user.get("name") or self.admin_user.get("username") or "Admin")
+        dash.set_admin_name(self.admin_user.get(
+            "name") or self.admin_user.get("username") or "Admin")
         self.show_frame("AdminDashboardFrame")
         self.auto_refresh_enabled = True
         self._schedule_poll()
@@ -161,7 +163,8 @@ class AdminApp(ctk.CTk):
                        f"is INACTIVE at {r['occurred_at']} "
                        f"(active streak: {seconds_to_hhmmss(r['active_duration_seconds'])}).")
                 try:
-                    notification.notify(title="User Inactive", message=msg, timeout=4, app_name=APP_NAME)
+                    notification.notify(
+                        title="User Inactive", message=msg, timeout=4, app_name=APP_NAME)
                 except Exception:
                     pass
                 try:
@@ -184,7 +187,8 @@ class AdminApp(ctk.CTk):
             text = dash.search_var.get().strip() or None
             st = dash.status_var.get().strip()
             status = None if st == "Any" else st
-            updated_users = list_users(search=text, status=status, hide_admin=True)
+            updated_users = list_users(
+                search=text, status=status, hide_admin=True)
         except Exception as e:
             print("Poll error:", e)
 
@@ -194,9 +198,7 @@ class AdminApp(ctk.CTk):
         self._schedule_poll()
 
 
-# =============================
 # Login Frame (CustomTk)
-# =============================
 class AdminLoginFrame(ctk.CTkFrame):
     def __init__(self, master):
         super().__init__(master, corner_radius=0, fg_color=APP_BG)
@@ -204,7 +206,8 @@ class AdminLoginFrame(ctk.CTkFrame):
         card = ctk.CTkFrame(self, corner_radius=12, fg_color=CARD_BG)
         card.pack(expand=True, fill="x", padx=32, pady=32)
 
-        ctk.CTkLabel(card, text="Admin Login", font=ctk.CTkFont(size=22, weight="bold")).pack(pady=(18, 6))
+        ctk.CTkLabel(card, text="Admin Login", font=ctk.CTkFont(
+            size=22, weight="bold")).pack(pady=(18, 6))
 
         self.login_id = tk.StringVar(value="")
         self.login_pwd = tk.StringVar(value="")
@@ -213,32 +216,41 @@ class AdminLoginFrame(ctk.CTkFrame):
         form.pack(fill="x", padx=20, pady=8)
 
         ctk.CTkLabel(form, text="Username or Email").pack(anchor="w")
-        self.e_user = ctk.CTkEntry(form, textvariable=self.login_id, placeholder_text="admin@example.com", height=40)
+        self.e_user = ctk.CTkEntry(
+            form, textvariable=self.login_id, placeholder_text="admin@example.com", height=40)
         self.e_user.pack(fill="x", pady=(2, 8))
 
         ctk.CTkLabel(form, text="Password").pack(anchor="w")
         row = ctk.CTkFrame(form, fg_color="transparent")
         row.pack(fill="x", pady=(2, 12))
-        self.e_pwd = ctk.CTkEntry(row, textvariable=self.login_pwd, show="•", placeholder_text="••••••••", height=40)
+        self.e_pwd = ctk.CTkEntry(
+            row, textvariable=self.login_pwd, show="•", placeholder_text="••••••••", height=40)
         self.e_pwd.pack(side="left", fill="x", expand=True)
 
         def toggle_pwd():
-            self.e_pwd.configure(show="" if self.e_pwd.cget("show") == "•" else "•")
-            btn_toggle.configure(text=("Hide" if self.e_pwd.cget("show") == "" else "Show"))
-        btn_toggle = ctk.CTkButton(row, text="Show", width=72, command=toggle_pwd)
+            self.e_pwd.configure(
+                show="" if self.e_pwd.cget("show") == "•" else "•")
+            btn_toggle.configure(
+                text=("Hide" if self.e_pwd.cget("show") == "" else "Show"))
+        btn_toggle = ctk.CTkButton(
+            row, text="Show", width=72, command=toggle_pwd)
         btn_toggle.pack(side="left", padx=(8, 0))
 
-        ctk.CTkButton(card, text="Login", height=42, command=self.do_login).pack(pady=(6, 18), padx=20, fill="x")
+        ctk.CTkButton(card, text="Login", height=42, command=self.do_login).pack(
+            pady=(6, 18), padx=20, fill="x")
 
         # Footer brand
         foot = ctk.CTkFrame(self, fg_color=BAR_BG, corner_radius=0)
         foot.pack(side="bottom", fill="x")
-        ctk.CTkLabel(foot, text="Mars Capital", font=ctk.CTkFont(size=12, weight="bold")).pack(side="left", padx=12, pady=6)
-        ctk.CTkLabel(foot, text="Lead with discipline. Excellence follows.", text_color=MUTED_TX).pack(side="right", padx=12, pady=6)
+        ctk.CTkLabel(foot, text="Mars Capital", font=ctk.CTkFont(
+            size=12, weight="bold")).pack(side="left", padx=12, pady=6)
+        ctk.CTkLabel(foot, text="Lead with discipline. Excellence follows.",
+                     text_color=MUTED_TX).pack(side="right", padx=12, pady=6)
 
     def do_login(self):
         try:
-            admin = login(self.login_id.get().strip(), self.login_pwd.get().strip())
+            admin = login(self.login_id.get().strip(),
+                          self.login_pwd.get().strip())
             if not admin:
                 messagebox.showerror("Login failed", "Invalid credentials")
                 return
@@ -247,9 +259,7 @@ class AdminLoginFrame(ctk.CTkFrame):
             messagebox.showerror("Error", str(e))
 
 
-# =============================
 # Dashboard (CustomTk)
-# =============================
 class AdminDashboardFrame(ctk.CTkFrame):
     def __init__(self, master):
         super().__init__(master, corner_radius=0, fg_color=APP_BG)
@@ -262,16 +272,20 @@ class AdminDashboardFrame(ctk.CTkFrame):
 
         left = ctk.CTkFrame(navbar, fg_color="transparent")
         left.pack(side="left", padx=12, pady=8)
-        ctk.CTkLabel(left, text="Mars Capital", font=ctk.CTkFont(size=16, weight="bold")).pack(anchor="w")
+        ctk.CTkLabel(left, text="Mars Capital", font=ctk.CTkFont(
+            size=16, weight="bold")).pack(anchor="w")
 
         middle = ctk.CTkFrame(navbar, fg_color="transparent")
         middle.pack(side="left", padx=16, pady=8)
-        ctk.CTkLabel(middle, textvariable=self.admin_name, text_color=MUTED_TX).pack(anchor="w")
+        ctk.CTkLabel(middle, textvariable=self.admin_name,
+                     text_color=MUTED_TX).pack(anchor="w")
 
         right = ctk.CTkFrame(navbar, fg_color="transparent")
         right.pack(side="right", padx=12, pady=8)
-        ctk.CTkButton(right, text="Add User", width=100, command=self.open_create_user).pack(side="left", padx=(0,8))
-        ctk.CTkButton(right, text="Logout", width=90, command=self.master.logout).pack(side="left")
+        ctk.CTkButton(right, text="Add User", width=100,
+                      command=self.open_create_user).pack(side="left", padx=(0, 8))
+        ctk.CTkButton(right, text="Logout", width=90,
+                      command=self.master.logout).pack(side="left")
 
         # ===== TOTALS STRIP =====
         totals = ctk.CTkFrame(self, fg_color="transparent")
@@ -281,9 +295,11 @@ class AdminDashboardFrame(ctk.CTkFrame):
             card = ctk.CTkFrame(parent, corner_radius=12, fg_color=CARD_BG)
             inner = ctk.CTkFrame(card, fg_color="transparent")
             inner.pack(fill="x", padx=14, pady=10)
-            ctk.CTkLabel(inner, text=label, text_color=MUTED_TX).pack(anchor="w")
+            ctk.CTkLabel(inner, text=label,
+                         text_color=MUTED_TX).pack(anchor="w")
             value_sv = tk.StringVar(value="0")
-            lbl = ctk.CTkLabel(inner, textvariable=value_sv, font=ctk.CTkFont(size=18, weight="bold"))
+            lbl = ctk.CTkLabel(inner, textvariable=value_sv,
+                               font=ctk.CTkFont(size=18, weight="bold"))
             lbl.configure(text_color=color)
             lbl.pack(anchor="w")
             return card, value_sv
@@ -291,37 +307,47 @@ class AdminDashboardFrame(ctk.CTkFrame):
         totals_row = ctk.CTkFrame(totals, fg_color="transparent")
         totals_row.pack(fill="x")
 
-        card_a, self.total_active_sv = make_total(totals_row, "Active Users", TOTAL_ACTIVE_COLOR)
-        card_i, self.total_inactive_sv = make_total(totals_row, "Inactive Users", TOTAL_INACTIVE_COLOR)
-        card_o, self.total_overtime_sv = make_total(totals_row, "Overtime (today)", TOTAL_OVERTIME_COLOR)
+        card_a, self.total_active_sv = make_total(
+            totals_row, "Active Users", TOTAL_ACTIVE_COLOR)
+        card_i, self.total_inactive_sv = make_total(
+            totals_row, "Inactive Users", TOTAL_INACTIVE_COLOR)
+        card_o, self.total_overtime_sv = make_total(
+            totals_row, "Overtime (today)", TOTAL_OVERTIME_COLOR)
 
-        card_a.pack(side="left", fill="x", expand=True, padx=(0,6))
+        card_a.pack(side="left", fill="x", expand=True, padx=(0, 6))
         card_i.pack(side="left", fill="x", expand=True, padx=6)
-        card_o.pack(side="left", fill="x", expand=True, padx=(6,0))
+        card_o.pack(side="left", fill="x", expand=True, padx=(6, 0))
 
         # ===== BODY LAYOUT =====
         body = ctk.CTkFrame(self, fg_color="transparent")
         body.pack(fill="both", expand=True, padx=12, pady=(6, 0))
 
         # Sidebar (filters)
-        sidebar = ctk.CTkFrame(body, width=280, corner_radius=12, fg_color=SIDEBAR_BG)
-        sidebar.pack(side="left", fill="y", padx=(0,8))
+        sidebar = ctk.CTkFrame(
+            body, width=280, corner_radius=12, fg_color=SIDEBAR_BG)
+        sidebar.pack(side="left", fill="y", padx=(0, 8))
         sidebar.pack_propagate(False)
 
-        ctk.CTkLabel(sidebar, text="Search", font=ctk.CTkFont(size=14, weight="bold")).pack(anchor="w", padx=12, pady=(12,4))
+        ctk.CTkLabel(sidebar, text="Search", font=ctk.CTkFont(
+            size=14, weight="bold")).pack(anchor="w", padx=12, pady=(12, 4))
         self.search_var = tk.StringVar()
-        self.search_entry = ctk.CTkEntry(sidebar, textvariable=self.search_var, placeholder_text="Name, username, email…")
+        self.search_entry = ctk.CTkEntry(
+            sidebar, textvariable=self.search_var, placeholder_text="Name, username, email…")
         self.search_entry.pack(fill="x", padx=12)
 
-        ctk.CTkLabel(sidebar, text="Status", font=ctk.CTkFont(size=14, weight="bold")).pack(anchor="w", padx=12, pady=(12,4))
+        ctk.CTkLabel(sidebar, text="Status", font=ctk.CTkFont(
+            size=14, weight="bold")).pack(anchor="w", padx=12, pady=(12, 4))
         self.status_var = tk.StringVar(value="Any")
-        self.status_cb = ctk.CTkComboBox(sidebar, values=["Any", "off", "active", "inactive"], variable=self.status_var, width=120)
+        self.status_cb = ctk.CTkComboBox(sidebar, values=[
+                                         "Any", "off", "active", "inactive"], variable=self.status_var, width=120)
         self.status_cb.pack(anchor="w", padx=12)
 
         btn_row = ctk.CTkFrame(sidebar, fg_color="transparent")
-        btn_row.pack(fill="x", padx=12, pady=(12,8))
-        ctk.CTkButton(btn_row, text="Search", command=self._do_search).pack(side="left", padx=(0,6))
-        ctk.CTkButton(btn_row, text="Clear",  command=self._clear_search).pack(side="left")
+        btn_row.pack(fill="x", padx=12, pady=(12, 8))
+        ctk.CTkButton(btn_row, text="Search", command=self._do_search).pack(
+            side="left", padx=(0, 6))
+        ctk.CTkButton(btn_row, text="Clear",
+                      command=self._clear_search).pack(side="left")
 
         # Content area (cards)
         content = ctk.CTkFrame(body, corner_radius=12, fg_color=CARD_BG)
@@ -331,10 +357,13 @@ class AdminDashboardFrame(ctk.CTkFrame):
         container = ctk.CTkFrame(content, fg_color="transparent")
         container.pack(fill="both", expand=True, padx=8, pady=8)
 
-        self.canvas = tk.Canvas(container, highlightthickness=0, bg=APP_BG[0] if ctk.get_appearance_mode()=="Light" else APP_BG[1])
-        vscroll = ttk.Scrollbar(container, orient="vertical", command=self.canvas.yview)
+        self.canvas = tk.Canvas(container, highlightthickness=0,
+                                bg=APP_BG[0] if ctk.get_appearance_mode() == "Light" else APP_BG[1])
+        vscroll = ttk.Scrollbar(
+            container, orient="vertical", command=self.canvas.yview)
         self.cards_frame = ctk.CTkFrame(self.canvas, fg_color="transparent")
-        self.cards_frame.bind("<Configure>", lambda e: self.canvas.configure(scrollregion=self.canvas.bbox("all")))
+        self.cards_frame.bind("<Configure>", lambda e: self.canvas.configure(
+            scrollregion=self.canvas.bbox("all")))
         self.canvas.create_window((0, 0), window=self.cards_frame, anchor="nw")
         self.canvas.configure(yscrollcommand=vscroll.set)
 
@@ -344,11 +373,12 @@ class AdminDashboardFrame(ctk.CTkFrame):
         # Footer
         foot = ctk.CTkFrame(self, fg_color=BAR_BG, corner_radius=0)
         foot.pack(side="bottom", fill="x")
-        ctk.CTkLabel(foot, text="Mars Capital", font=ctk.CTkFont(size=12, weight="bold")).pack(side="left", padx=12, pady=6)
+        ctk.CTkLabel(foot, text="Mars Capital", font=ctk.CTkFont(
+            size=12, weight="bold")).pack(side="left", padx=12, pady=6)
         ctk.CTkLabel(foot, text="Work hard in silence; let success make the noise.", text_color=MUTED_TX)\
             .pack(side="right", padx=12, pady=6)
 
-        self.user_cards = {}  # user_id -> widgets
+        self.user_cards = {}
         # live search typing
         self._search_job = None
 
@@ -407,27 +437,34 @@ class AdminDashboardFrame(ctk.CTkFrame):
 
         # place/update cards
         cols = 3
-        users_sorted = sorted(users, key=lambda x: (x.get("name") or "", x.get("username") or ""))
+        users_sorted = sorted(users, key=lambda x: (
+            x.get("name") or "", x.get("username") or ""))
 
         for idx, u in enumerate(users_sorted):
             uid = u["id"]
             info = self.user_cards.get(uid)
             if info is None:
-                card = ctk.CTkFrame(self.cards_frame, corner_radius=12, fg_color=CARD_BG)
+                card = ctk.CTkFrame(
+                    self.cards_frame, corner_radius=12, fg_color=CARD_BG)
                 top = ctk.CTkFrame(card, fg_color="transparent")
                 top.pack(fill="x", padx=12, pady=10)
-                name_lbl = ctk.CTkLabel(top, text=u["name"] or "", font=ctk.CTkFont(size=14, weight="bold"))
+                name_lbl = ctk.CTkLabel(
+                    top, text=u["name"] or "", font=ctk.CTkFont(size=14, weight="bold"))
                 name_lbl.pack(anchor="w")
-                user_lbl = ctk.CTkLabel(top, text=f"@{u['username']}", text_color=MUTED_TX)
+                user_lbl = ctk.CTkLabel(
+                    top, text=f"@{u['username']}", text_color=MUTED_TX)
                 user_lbl.pack(anchor="w")
-                dept_lbl = ctk.CTkLabel(top, text=f"Dept: {u['department']}", text_color=MUTED_TX)
+                dept_lbl = ctk.CTkLabel(
+                    top, text=f"Dept: {u['department']}", text_color=MUTED_TX)
                 dept_lbl.pack(anchor="w")
-                status_lbl = ctk.CTkLabel(top, text=f"Status: {u['status'].lower()}")
+                status_lbl = ctk.CTkLabel(
+                    top, text=f"Status: {u['status'].lower()}")
                 # color status inline
-                color = {"active": "#22c55e", "inactive": "#ef4444", "off": "#000000"}.get(u["status"].lower(), None)
+                color = {"active": "#22c55e", "inactive": "#ef4444",
+                         "off": "#000000"}.get(u["status"].lower(), None)
                 if color:
                     status_lbl.configure(text_color=color)
-                status_lbl.pack(anchor="w", pady=(4,0))
+                status_lbl.pack(anchor="w", pady=(4, 0))
 
                 # single action: View Details
                 btn_row = ctk.CTkFrame(card, fg_color="transparent")
@@ -436,7 +473,8 @@ class AdminDashboardFrame(ctk.CTkFrame):
                               command=lambda uid=uid, uname=u["name"] or u["username"]: self.open_details(uid, uname))\
                     .pack(side="left")
 
-                info = {"frame": card, "name_lbl": name_lbl, "user_lbl": user_lbl, "dept_lbl": dept_lbl, "status_lbl": status_lbl}
+                info = {"frame": card, "name_lbl": name_lbl, "user_lbl": user_lbl,
+                        "dept_lbl": dept_lbl, "status_lbl": status_lbl}
                 self.user_cards[uid] = info
             else:
                 # tiny diffs
@@ -452,20 +490,24 @@ class AdminDashboardFrame(ctk.CTkFrame):
                 status_txt = f"Status: {u['status'].lower()}"
                 if info["status_lbl"].cget("text") != status_txt:
                     info["status_lbl"].configure(text=status_txt)
-                color = {"active": "#22c55e", "inactive": "#ef4444", "off": "#000000"}.get(u["status"].lower(), None)
+                color = {"active": "#22c55e", "inactive": "#ef4444",
+                         "off": "#000000"}.get(u["status"].lower(), None)
                 if color:
                     info["status_lbl"].configure(text_color=color)
 
             r, c = divmod(idx, cols)
-            self.user_cards[uid]["frame"].grid(row=r, column=c, padx=8, pady=8, sticky="nsew")
+            self.user_cards[uid]["frame"].grid(
+                row=r, column=c, padx=8, pady=8, sticky="nsew")
 
         # column weights
         for i in range(cols):
-            self.cards_frame.grid_columnconfigure(i, weight=1,minsize=490)
+            self.cards_frame.grid_columnconfigure(i, weight=1, minsize=490)
 
         # ---- totals strip update ----
-        active_count = sum(1 for u in users if (u.get("status") or "").lower() == "active")
-        inactive_count = sum(1 for u in users if (u.get("status") or "").lower() == "inactive")
+        active_count = sum(1 for u in users if (
+            u.get("status") or "").lower() == "active")
+        inactive_count = sum(1 for u in users if (
+            u.get("status") or "").lower() == "inactive")
 
         # Overtime today total across visible users
         today = datetime.now().date()
@@ -475,7 +517,8 @@ class AdminDashboardFrame(ctk.CTkFrame):
         try:
             for u in users:
                 try:
-                    overtime_total += int(fetch_overtime_sum(u["id"], start, end) or 0)
+                    overtime_total += int(
+                        fetch_overtime_sum(u["id"], start, end) or 0)
                 except Exception:
                     pass
         except Exception:
@@ -494,10 +537,9 @@ class AdminDashboardFrame(ctk.CTkFrame):
             self.master.auto_refresh_enabled = True
         self._do_search()
 
-
-# =============================
 # Dialogs (CustomTk versions)
-# =============================
+
+
 class CreateUserDialog(ctk.CTkToplevel):
     def __init__(self, master):
         super().__init__(master)
@@ -520,7 +562,7 @@ class CreateUserDialog(ctk.CTkToplevel):
         self.v_dept = tk.StringVar()
         self.v_email = tk.StringVar()
         self.v_password = tk.StringVar()
-        self.v_password2 = tk.StringVar()  # NEW: confirm password
+        self.v_password2 = tk.StringVar()
         self.v_shift_start = tk.StringVar(value="09:00:00")
         self.v_shift_end = tk.StringVar(value="18:00:00")
 
@@ -545,11 +587,13 @@ class CreateUserDialog(ctk.CTkToplevel):
         row("Department", self.v_dept, "dept")
         row("Email", self.v_email, "email")
         row("Password", self.v_password, "password", is_pwd=True)
-        row("Confirm Password", self.v_password2, "password2", is_pwd=True)  # NEW field
+        row("Confirm Password", self.v_password2,
+            "password2", is_pwd=True)  # NEW field
         row("Shift Start (HH:MM:SS)", self.v_shift_start, "shift_start")
         row("Shift End (HH:MM:SS)", self.v_shift_end, "shift_end")
 
-        ctk.CTkButton(p, text="Create", command=self.do_create, height=40).pack(pady=12, fill="x")
+        ctk.CTkButton(p, text="Create", command=self.do_create,
+                      height=40).pack(pady=12, fill="x")
 
         self.after(10, self._center)
 
@@ -563,7 +607,8 @@ class CreateUserDialog(ctk.CTkToplevel):
     def _mark_error(self, entry: ctk.CTkEntry):
         try:
             entry.configure(border_color="#ef4444", border_width=2)
-            self.after(1500, lambda: entry.configure(border_color="transparent", border_width=1))
+            self.after(1500, lambda: entry.configure(
+                border_color="transparent", border_width=1))
         except Exception:
             pass
 
@@ -586,18 +631,23 @@ class CreateUserDialog(ctk.CTkToplevel):
             for i, k in enumerate(missing_keys):
                 self._mark_error(self.inputs[k])
                 if i == 0:
-                    try: self.inputs[k].focus_set()
-                    except Exception: pass
+                    try:
+                        self.inputs[k].focus_set()
+                    except Exception:
+                        pass
             missing_labels = ", ".join(vals[k][1] for k in missing_keys)
-            messagebox.showerror("Validation", f"All fields are required. Please fill: {missing_labels}")
+            messagebox.showerror(
+                "Validation", f"All fields are required. Please fill: {missing_labels}")
             return
 
         # 2) passwords must match
         if vals["password"][0] != vals["password2"][0]:
             self._mark_error(self.inputs["password"])
             self._mark_error(self.inputs["password2"])
-            try: self.inputs["password"].focus_set()
-            except Exception: pass
+            try:
+                self.inputs["password"].focus_set()
+            except Exception:
+                pass
             messagebox.showerror("Validation", "Passwords do not match.")
             return
 
@@ -607,7 +657,7 @@ class CreateUserDialog(ctk.CTkToplevel):
                 vals["name"][0],
                 vals["dept"][0],
                 vals["email"][0],
-                vals["password"][0],  # send the actual password
+                vals["password"][0],
                 shift_start_time=vals["shift_start"][0],
                 shift_end_time=vals["shift_end"][0],
             )
@@ -627,20 +677,22 @@ class UpdateUserDialog(ctk.CTkToplevel):
         self.configure(fg_color=BAR_BG)
 
         # wider default size + sensible minimums
-        self.geometry("200x350")     # <— increase width/height as you like
+        self.geometry("200x350")
         self.minsize(340, 560)
 
         p = ctk.CTkFrame(self, corner_radius=12, fg_color=CARD_BG)
         p.pack(fill="both", expand=True, padx=16, pady=16)
-        p.configure(width=740)       # <— hint the inner frame to be wider
+        p.configure(width=740)
 
         self.user_id = urow["id"]
         self.v_name = tk.StringVar(value=urow.get("name") or "")
         self.v_dept = tk.StringVar(value=urow.get("department") or "")
         self.v_email = tk.StringVar(value=urow.get("email") or "")
         self.v_username = tk.StringVar(value=urow.get("username") or "")
-        self.v_shift_start = tk.StringVar(value=str(urow.get("shift_start_time") or "09:00:00"))
-        self.v_shift_end = tk.StringVar(value=str(urow.get("shift_end_time") or "18:00:00"))
+        self.v_shift_start = tk.StringVar(
+            value=str(urow.get("shift_start_time") or "09:00:00"))
+        self.v_shift_end = tk.StringVar(
+            value=str(urow.get("shift_end_time") or "18:00:00"))
         self.v_pass1 = tk.StringVar(value="")
         self.v_pass2 = tk.StringVar(value="")
 
@@ -661,12 +713,16 @@ class UpdateUserDialog(ctk.CTkToplevel):
         row("Shift Start (HH:MM:SS)", self.v_shift_start)
         row("Shift End (HH:MM:SS)", self.v_shift_end)
 
-        ctk.CTkLabel(p, text="New Password (leave blank to keep)").pack(anchor="w", pady=(10, 0))
-        ctk.CTkEntry(p, textvariable=self.v_pass1, show="•", placeholder_text="New Password", height=38).pack(fill="x")
+        ctk.CTkLabel(p, text="New Password (leave blank to keep)").pack(
+            anchor="w", pady=(10, 0))
+        ctk.CTkEntry(p, textvariable=self.v_pass1, show="•",
+                     placeholder_text="New Password", height=38).pack(fill="x")
         ctk.CTkLabel(p, text="Confirm Password").pack(anchor="w", pady=(6, 0))
-        ctk.CTkEntry(p, textvariable=self.v_pass2, show="•", placeholder_text="Confirm Password", height=38).pack(fill="x")
+        ctk.CTkEntry(p, textvariable=self.v_pass2, show="•",
+                     placeholder_text="Confirm Password", height=38).pack(fill="x")
 
-        ctk.CTkButton(p, text="Save", command=self.do_save, height=40).pack(pady=12, fill="x")
+        ctk.CTkButton(p, text="Save", command=self.do_save,
+                      height=40).pack(pady=12, fill="x")
 
         # center after geometry is applied
         self.after(10, self._center)
@@ -696,10 +752,12 @@ class UpdateUserDialog(ctk.CTkToplevel):
                 return
             if p1 or p2:
                 if p1 != p2:
-                    messagebox.showerror("Validation", "Passwords do not match.")
+                    messagebox.showerror(
+                        "Validation", "Passwords do not match.")
                     return
                 if len(p1) < 6:
-                    messagebox.showerror("Validation", "Password must be at least 6 characters.")
+                    messagebox.showerror(
+                        "Validation", "Password must be at least 6 characters.")
                     return
 
             payload = dict(
@@ -727,6 +785,7 @@ class DetailDialog(ctk.CTkToplevel):
     History includes a sidebar with filters; events with type 'inactive' are highlighted red.
     Media hides id/event_id/duration/mime columns per your request.
     """
+
     def __init__(self, master, user_id, user_name):
         super().__init__(master)
         self.title(f"User Details — {user_name}")
@@ -751,20 +810,25 @@ class DetailDialog(ctk.CTkToplevel):
 
         over_card = ctk.CTkFrame(tab_over, corner_radius=12, fg_color=CARD_BG)
         over_card.pack(fill="x", padx=10, pady=10)
-        ctk.CTkLabel(over_card, text=f"Name: {fresh.get('name') or ''}").pack(anchor="w", padx=12, pady=(10,0))
+        ctk.CTkLabel(over_card, text=f"Name: {fresh.get('name') or ''}").pack(
+            anchor="w", padx=12, pady=(10, 0))
         ctk.CTkLabel(over_card, text=f"Username: @{fresh.get('username') or ''}", text_color=MUTED_TX)\
             .pack(anchor="w", padx=12)
         ctk.CTkLabel(over_card, text=f"Department: {fresh.get('department') or ''}", text_color=MUTED_TX)\
-            .pack(anchor="w", padx=12, pady=(0,10))
+            .pack(anchor="w", padx=12, pady=(0, 10))
         st = (fresh.get("status") or "").lower()
-        status_color = {"active":"#22c55e","inactive":"#ef4444","off":"#000000"}.get(st, None)
-        ctk.CTkLabel(over_card, text=f"Status: {st}", text_color=status_color).pack(anchor="w", padx=12, pady=(0,10))
+        status_color = {"active": "#22c55e",
+                        "inactive": "#ef4444", "off": "#000000"}.get(st, None)
+        ctk.CTkLabel(over_card, text=f"Status: {st}", text_color=status_color).pack(
+            anchor="w", padx=12, pady=(0, 10))
 
         # Actions row (the 4 buttons live here)
         actions = ctk.CTkFrame(tab_over, fg_color="transparent")
-        actions.pack(fill="x", padx=10, pady=(0,10))
-        ctk.CTkButton(actions, text="History", width=120, command=lambda: nb.select(tab_over_history)).pack(side="left", padx=(0,8))
-        ctk.CTkButton(actions, text="Media", width=120, command=lambda: nb.select(tab_media)).pack(side="left", padx=8)
+        actions.pack(fill="x", padx=10, pady=(0, 10))
+        ctk.CTkButton(actions, text="History", width=120, command=lambda: nb.select(
+            tab_over_history)).pack(side="left", padx=(0, 8))
+        ctk.CTkButton(actions, text="Media", width=120, command=lambda: nb.select(
+            tab_media)).pack(side="left", padx=8)
         ctk.CTkButton(actions, text="Update", width=120,
                       command=lambda: self._open_update_then_refresh(nb, tab_over)).pack(side="left", padx=8)
         ctk.CTkButton(actions, text="Delete", fg_color="#ef4444",
@@ -778,69 +842,85 @@ class DetailDialog(ctk.CTkToplevel):
         hist_body.pack(fill="both", expand=True, padx=8, pady=8)
 
         # Sidebar filters
-        side = ctk.CTkFrame(hist_body, width=260, corner_radius=12, fg_color=SIDEBAR_BG)
-        side.pack(side="left", fill="y", padx=(0,8))
+        side = ctk.CTkFrame(hist_body, width=260,
+                            corner_radius=12, fg_color=SIDEBAR_BG)
+        side.pack(side="left", fill="y", padx=(0, 8))
         side.pack_propagate(False)
 
-        ctk.CTkLabel(side, text="Filters", font=ctk.CTkFont(size=14, weight="bold")).pack(anchor="w", padx=12, pady=(12,6))
+        ctk.CTkLabel(side, text="Filters", font=ctk.CTkFont(
+            size=14, weight="bold")).pack(anchor="w", padx=12, pady=(12, 6))
         self.v_period = tk.StringVar(value="Custom")
         ctk.CTkLabel(side, text="Period").pack(anchor="w", padx=12)
-        ctk.CTkComboBox(side, values=["Day","Week","Month","Custom"], variable=self.v_period, width=120).pack(anchor="w", padx=12, pady=(0,6))
+        ctk.CTkComboBox(side, values=["Day", "Week", "Month", "Custom"], variable=self.v_period, width=120).pack(
+            anchor="w", padx=12, pady=(0, 6))
 
         self.v_start = tk.StringVar()
-        self.v_end   = tk.StringVar()
+        self.v_end = tk.StringVar()
 
         ctk.CTkLabel(side, text="Start (YYYY-MM-DD)").pack(anchor="w", padx=12)
-        ctk.CTkEntry(side, textvariable=self.v_start, placeholder_text="YYYY-MM-DD").pack(fill="x", padx=12, pady=(0,6))
+        ctk.CTkEntry(side, textvariable=self.v_start,
+                     placeholder_text="YYYY-MM-DD").pack(fill="x", padx=12, pady=(0, 6))
         ctk.CTkLabel(side, text="End (YYYY-MM-DD)").pack(anchor="w", padx=12)
-        ctk.CTkEntry(side, textvariable=self.v_end, placeholder_text="YYYY-MM-DD").pack(fill="x", padx=12, pady=(0,6))
+        ctk.CTkEntry(side, textvariable=self.v_end,
+                     placeholder_text="YYYY-MM-DD").pack(fill="x", padx=12, pady=(0, 6))
 
         btns = ctk.CTkFrame(side, fg_color="transparent")
-        btns.pack(anchor="w", padx=12, pady=(8,12))
-        ctk.CTkButton(btns, text="Search", command=self._hist_reload).pack(side="left", padx=(0,6))
-        ctk.CTkButton(btns, text="Clear",  command=self._hist_clear).pack(side="left")
+        btns.pack(anchor="w", padx=12, pady=(8, 12))
+        ctk.CTkButton(btns, text="Search", command=self._hist_reload).pack(
+            side="left", padx=(0, 6))
+        ctk.CTkButton(btns, text="Clear",
+                      command=self._hist_clear).pack(side="left")
 
         # Totals strip
         totals = ctk.CTkFrame(hist_body, fg_color="transparent")
-        totals.pack(side="top", fill="x", padx=8, pady=(0,6))
+        totals.pack(side="top", fill="x", padx=8, pady=(0, 6))
 
         def make_total(parent, label, color):
             card = ctk.CTkFrame(parent, corner_radius=12, fg_color=CARD_BG)
             inner = ctk.CTkFrame(card, fg_color="transparent")
             inner.pack(fill="x", padx=14, pady=10)
-            ctk.CTkLabel(inner, text=label, text_color=MUTED_TX).pack(anchor="w")
+            ctk.CTkLabel(inner, text=label,
+                         text_color=MUTED_TX).pack(anchor="w")
             value_sv = tk.StringVar(value="00:00:00")
-            lbl = ctk.CTkLabel(inner, textvariable=value_sv, font=ctk.CTkFont(size=16, weight="bold"))
+            lbl = ctk.CTkLabel(inner, textvariable=value_sv,
+                               font=ctk.CTkFont(size=16, weight="bold"))
             lbl.configure(text_color=color)
             lbl.pack(anchor="w")
             return card, value_sv
 
         totals_row = ctk.CTkFrame(totals, fg_color="transparent")
         totals_row.pack(fill="x")
-        card_a, self.t_active_sv = make_total(totals_row, "Total Active", "#10b981")
-        card_i, self.t_inactive_sv = make_total(totals_row, "Total Inactive (est.)", "#ef4444")
-        card_o, self.t_overtime_sv = make_total(totals_row, "Total Overtime", "#3b82f6")
-        card_a.pack(side="left", fill="x", expand=True, padx=(0,6))
+        card_a, self.t_active_sv = make_total(
+            totals_row, "Total Active", "#10b981")
+        card_i, self.t_inactive_sv = make_total(
+            totals_row, "Total Inactive (est.)", "#ef4444")
+        card_o, self.t_overtime_sv = make_total(
+            totals_row, "Total Overtime", "#3b82f6")
+        card_a.pack(side="left", fill="x", expand=True, padx=(0, 6))
         card_i.pack(side="left", fill="x", expand=True, padx=6)
-        card_o.pack(side="left", fill="x", expand=True, padx=(6,0))
+        card_o.pack(side="left", fill="x", expand=True, padx=(6, 0))
 
         # Table area
-        table_wrap = ctk.CTkFrame(hist_body, corner_radius=12, fg_color=CARD_BG)
+        table_wrap = ctk.CTkFrame(
+            hist_body, corner_radius=12, fg_color=CARD_BG)
         table_wrap.pack(fill="both", expand=True, padx=8, pady=4)
 
         cols = ("username", "email", "event", "occurred_at", "active_duration")
-        self.tree_hist = ttk.Treeview(table_wrap, columns=cols, show="headings")
+        self.tree_hist = ttk.Treeview(
+            table_wrap, columns=cols, show="headings")
         headers = {
             "username": "username", "email": "email", "event": "event",
             "occurred_at": "occurred_at", "active_duration": "active_duration"
         }
         for c in cols:
             self.tree_hist.heading(c, text=headers[c])
-            self.tree_hist.column(c, width=170 if c not in ("email", "occurred_at") else 240, anchor="w")
+            self.tree_hist.column(c, width=170 if c not in (
+                "email", "occurred_at") else 240, anchor="w")
         self.tree_hist.pack(fill="both", expand=True, padx=6, pady=6)
 
         # tag style for inactive events
-        self.tree_hist.tag_configure("inactive_row", background=INACTIVE_ROW_BG)
+        self.tree_hist.tag_configure(
+            "inactive_row", background=INACTIVE_ROW_BG)
 
         # initial load
         self._hist_reload()
@@ -851,29 +931,35 @@ class DetailDialog(ctk.CTkToplevel):
 
         # Screenshots (simple columns: taken_at, url)
         scr_card = ctk.CTkFrame(tab_media, corner_radius=12, fg_color=CARD_BG)
-        scr_card.pack(fill="both", expand=True, padx=8, pady=(8,4))
-        ctk.CTkLabel(scr_card, text="Screenshots", font=ctk.CTkFont(size=14, weight="bold")).pack(anchor="w", padx=10, pady=(10,0))
+        scr_card.pack(fill="both", expand=True, padx=8, pady=(8, 4))
+        ctk.CTkLabel(scr_card, text="Screenshots", font=ctk.CTkFont(
+            size=14, weight="bold")).pack(anchor="w", padx=10, pady=(10, 0))
 
-        self.tree_scr = ttk.Treeview(scr_card, columns=("taken_at","url"), show="headings", height=8)
+        self.tree_scr = ttk.Treeview(scr_card, columns=(
+            "taken_at", "url"), show="headings", height=8)
         self.tree_scr.heading("taken_at", text="taken_at")
         self.tree_scr.heading("url", text="url")
         self.tree_scr.column("taken_at", width=220, anchor="w")
         self.tree_scr.column("url", width=600, anchor="w")
-        self.tree_scr.pack(fill="both", expand=True, padx=10, pady=(6,6))
-        ctk.CTkButton(scr_card, text="Open selected", command=self.open_selected_screenshot).pack(anchor="e", padx=10, pady=(0,10))
+        self.tree_scr.pack(fill="both", expand=True, padx=10, pady=(6, 6))
+        ctk.CTkButton(scr_card, text="Open selected", command=self.open_selected_screenshot).pack(
+            anchor="e", padx=10, pady=(0, 10))
 
         # Recordings (simple columns: recorded_at, url)
         rec_card = ctk.CTkFrame(tab_media, corner_radius=12, fg_color=CARD_BG)
-        rec_card.pack(fill="both", expand=True, padx=8, pady=(4,8))
-        ctk.CTkLabel(rec_card, text="Recordings", font=ctk.CTkFont(size=14, weight="bold")).pack(anchor="w", padx=10, pady=(10,0))
+        rec_card.pack(fill="both", expand=True, padx=8, pady=(4, 8))
+        ctk.CTkLabel(rec_card, text="Recordings", font=ctk.CTkFont(
+            size=14, weight="bold")).pack(anchor="w", padx=10, pady=(10, 0))
 
-        self.tree_rec = ttk.Treeview(rec_card, columns=("recorded_at","url"), show="headings", height=8)
+        self.tree_rec = ttk.Treeview(rec_card, columns=(
+            "recorded_at", "url"), show="headings", height=8)
         self.tree_rec.heading("recorded_at", text="recorded_at")
         self.tree_rec.heading("url", text="url")
         self.tree_rec.column("recorded_at", width=220, anchor="w")
         self.tree_rec.column("url", width=600, anchor="w")
-        self.tree_rec.pack(fill="both", expand=True, padx=10, pady=(6,6))
-        ctk.CTkButton(rec_card, text="Open selected", command=self.open_selected_recording).pack(anchor="e", padx=10, pady=(0,10))
+        self.tree_rec.pack(fill="both", expand=True, padx=10, pady=(6, 6))
+        ctk.CTkButton(rec_card, text="Open selected", command=self.open_selected_recording).pack(
+            anchor="e", padx=10, pady=(0, 10))
 
         # load media
         self._reload_media()
@@ -883,9 +969,10 @@ class DetailDialog(ctk.CTkToplevel):
         nb.add(tab_update, text="Update")
 
         fresh = get_user_by_id(self.user_id) or {}
-        ctk.CTkLabel(tab_update, text="Update User", font=ctk.CTkFont(size=16, weight="bold")).pack(anchor="w", padx=12, pady=(12,0))
+        ctk.CTkLabel(tab_update, text="Update User", font=ctk.CTkFont(
+            size=16, weight="bold")).pack(anchor="w", padx=12, pady=(12, 0))
         ctk.CTkButton(tab_update, text="Open Update Form", command=lambda: self._open_update_then_refresh(nb, tab_update))\
-            .pack(anchor="w", padx=12, pady=(8,12))
+            .pack(anchor="w", padx=12, pady=(8, 12))
 
     def _delete_user_confirm(self):
         if not messagebox.askyesno("Confirm", "Delete this user? This cannot be undone."):
@@ -908,9 +995,11 @@ class DetailDialog(ctk.CTkToplevel):
         elif p == "Month":
             start = today.replace(day=1)
             if start.month == 12:
-                end = start.replace(year=start.year+1, month=1, day=1) - timedelta(days=1)
+                end = start.replace(year=start.year+1,
+                                    month=1, day=1) - timedelta(days=1)
             else:
-                end = start.replace(month=start.month+1, day=1) - timedelta(days=1)
+                end = start.replace(month=start.month+1,
+                                    day=1) - timedelta(days=1)
         else:
             s = self.v_start.get().strip() or None
             e = self.v_end.get().strip() or None
@@ -928,7 +1017,8 @@ class DetailDialog(ctk.CTkToplevel):
             self.tree_hist.delete(i)
 
         start, end = self._compute_dates()
-        rows = fetch_user_inactive_history(self.user_id, start, end, limit=1500)
+        rows = fetch_user_inactive_history(
+            self.user_id, start, end, limit=1500)
 
         total_active = 0
         INACTIVITY_THRESHOLD = 10
@@ -937,8 +1027,10 @@ class DetailDialog(ctk.CTkToplevel):
         for r in rows:
             ad = int(r.get("active_duration_seconds") or 0)
             total_active += ad
-            vals = (r["username"], r["email"], r["event_type"], str(r["occurred_at"]), seconds_to_hhmmss(ad))
-            tag = "inactive_row" if (r.get("event_type") or "").lower() == "inactive" else ""
+            vals = (r["username"], r["email"], r["event_type"],
+                    str(r["occurred_at"]), seconds_to_hhmmss(ad))
+            tag = "inactive_row" if (
+                r.get("event_type") or "").lower() == "inactive" else ""
             self.tree_hist.insert("", "end", values=vals, tags=(tag,))
 
             if (r.get("event_type") or "").lower() == "inactive":
@@ -959,11 +1051,13 @@ class DetailDialog(ctk.CTkToplevel):
 
         scrs = fetch_screenshots_for_user(self.user_id, limit=200)
         for s in scrs:
-            self.tree_scr.insert("", "end", values=(str(s["taken_at"]), s["url"]))
+            self.tree_scr.insert("", "end", values=(
+                str(s["taken_at"]), s["url"]))
 
         recs = fetch_recordings_for_user(self.user_id, limit=100)
         for r in recs:
-            self.tree_rec.insert("", "end", values=(str(r["recorded_at"]), r["url"]))
+            self.tree_rec.insert("", "end", values=(
+                str(r["recorded_at"]), r["url"]))
 
     def open_selected_screenshot(self):
         sel = self.tree_scr.selection()
@@ -995,9 +1089,7 @@ class DetailDialog(ctk.CTkToplevel):
             self._reload_media()
 
 
-# -----------------------------
 # Launcher
-# -----------------------------
 if __name__ == "__main__":
     try:
         print("Starting AdminApp…")
