@@ -810,17 +810,25 @@ class DetailDialog(ctk.CTkToplevel):
 
         over_card = ctk.CTkFrame(tab_over, corner_radius=12, fg_color=CARD_BG)
         over_card.pack(fill="x", padx=10, pady=10)
-        ctk.CTkLabel(over_card, text=f"Name: {fresh.get('name') or ''}").pack(
-            anchor="w", padx=12, pady=(10, 0))
-        ctk.CTkLabel(over_card, text=f"Username: @{fresh.get('username') or ''}", text_color=MUTED_TX)\
-            .pack(anchor="w", padx=12)
-        ctk.CTkLabel(over_card, text=f"Department: {fresh.get('department') or ''}", text_color=MUTED_TX)\
-            .pack(anchor="w", padx=12, pady=(0, 10))
+
+        # Keep label references so we can update them later
+        self.over_name_lbl = ctk.CTkLabel(over_card, text=f"Name: {fresh.get('name') or ''}")
+        self.over_name_lbl.pack(anchor="w", padx=12, pady=(10, 0))
+
+        self.over_user_lbl = ctk.CTkLabel(
+            over_card, text=f"Username: @{fresh.get('username') or ''}", text_color=MUTED_TX
+        )
+        self.over_user_lbl.pack(anchor="w", padx=12)
+
+        self.over_dept_lbl = ctk.CTkLabel(
+            over_card, text=f"Department: {fresh.get('department') or ''}", text_color=MUTED_TX
+        )
+        self.over_dept_lbl.pack(anchor="w", padx=12, pady=(0, 10))
+
         st = (fresh.get("status") or "").lower()
-        status_color = {"active": "#22c55e",
-                        "inactive": "#ef4444", "off": "#000000"}.get(st, None)
-        ctk.CTkLabel(over_card, text=f"Status: {st}", text_color=status_color).pack(
-            anchor="w", padx=12, pady=(0, 10))
+        status_color = {"active": "#22c55e", "inactive": "#ef4444", "off": "#000000"}.get(st, None)
+        self.over_status_lbl = ctk.CTkLabel(over_card, text=f"Status: {st}", text_color=status_color)
+        self.over_status_lbl.pack(anchor="w", padx=12, pady=(0, 10))
 
         # Actions row (the 4 buttons live here)
         actions = ctk.CTkFrame(tab_over, fg_color="transparent")
@@ -842,34 +850,31 @@ class DetailDialog(ctk.CTkToplevel):
         hist_body.pack(fill="both", expand=True, padx=8, pady=8)
 
         # Sidebar filters
-        side = ctk.CTkFrame(hist_body, width=260,
-                            corner_radius=12, fg_color=SIDEBAR_BG)
+        side = ctk.CTkFrame(hist_body, width=260, corner_radius=12, fg_color=SIDEBAR_BG)
         side.pack(side="left", fill="y", padx=(0, 8))
         side.pack_propagate(False)
 
-        ctk.CTkLabel(side, text="Filters", font=ctk.CTkFont(
-            size=14, weight="bold")).pack(anchor="w", padx=12, pady=(12, 6))
+        ctk.CTkLabel(side, text="Filters", font=ctk.CTkFont(size=14, weight="bold"))\
+            .pack(anchor="w", padx=12, pady=(12, 6))
         self.v_period = tk.StringVar(value="Custom")
         ctk.CTkLabel(side, text="Period").pack(anchor="w", padx=12)
-        ctk.CTkComboBox(side, values=["Day", "Week", "Month", "Custom"], variable=self.v_period, width=120).pack(
-            anchor="w", padx=12, pady=(0, 6))
+        ctk.CTkComboBox(side, values=["Day", "Week", "Month", "Custom"], variable=self.v_period, width=120)\
+            .pack(anchor="w", padx=12, pady=(0, 6))
 
         self.v_start = tk.StringVar()
         self.v_end = tk.StringVar()
 
         ctk.CTkLabel(side, text="Start (YYYY-MM-DD)").pack(anchor="w", padx=12)
-        ctk.CTkEntry(side, textvariable=self.v_start,
-                     placeholder_text="YYYY-MM-DD").pack(fill="x", padx=12, pady=(0, 6))
+        ctk.CTkEntry(side, textvariable=self.v_start, placeholder_text="YYYY-MM-DD")\
+            .pack(fill="x", padx=12, pady=(0, 6))
         ctk.CTkLabel(side, text="End (YYYY-MM-DD)").pack(anchor="w", padx=12)
-        ctk.CTkEntry(side, textvariable=self.v_end,
-                     placeholder_text="YYYY-MM-DD").pack(fill="x", padx=12, pady=(0, 6))
+        ctk.CTkEntry(side, textvariable=self.v_end, placeholder_text="YYYY-MM-DD")\
+            .pack(fill="x", padx=12, pady=(0, 6))
 
         btns = ctk.CTkFrame(side, fg_color="transparent")
         btns.pack(anchor="w", padx=12, pady=(8, 12))
-        ctk.CTkButton(btns, text="Search", command=self._hist_reload).pack(
-            side="left", padx=(0, 6))
-        ctk.CTkButton(btns, text="Clear",
-                      command=self._hist_clear).pack(side="left")
+        ctk.CTkButton(btns, text="Search", command=self._hist_reload).pack(side="left", padx=(0, 6))
+        ctk.CTkButton(btns, text="Clear", command=self._hist_clear).pack(side="left")
 
         # Totals strip
         totals = ctk.CTkFrame(hist_body, fg_color="transparent")
@@ -879,48 +884,39 @@ class DetailDialog(ctk.CTkToplevel):
             card = ctk.CTkFrame(parent, corner_radius=12, fg_color=CARD_BG)
             inner = ctk.CTkFrame(card, fg_color="transparent")
             inner.pack(fill="x", padx=14, pady=10)
-            ctk.CTkLabel(inner, text=label,
-                         text_color=MUTED_TX).pack(anchor="w")
+            ctk.CTkLabel(inner, text=label, text_color=MUTED_TX).pack(anchor="w")
             value_sv = tk.StringVar(value="00:00:00")
-            lbl = ctk.CTkLabel(inner, textvariable=value_sv,
-                               font=ctk.CTkFont(size=16, weight="bold"))
+            lbl = ctk.CTkLabel(inner, textvariable=value_sv, font=ctk.CTkFont(size=16, weight="bold"))
             lbl.configure(text_color=color)
             lbl.pack(anchor="w")
             return card, value_sv
 
         totals_row = ctk.CTkFrame(totals, fg_color="transparent")
         totals_row.pack(fill="x")
-        card_a, self.t_active_sv = make_total(
-            totals_row, "Total Active", "#10b981")
-        card_i, self.t_inactive_sv = make_total(
-            totals_row, "Total Inactive (est.)", "#ef4444")
-        card_o, self.t_overtime_sv = make_total(
-            totals_row, "Total Overtime", "#3b82f6")
+        card_a, self.t_active_sv = make_total(totals_row, "Total Active", "#10b981")
+        card_i, self.t_inactive_sv = make_total(totals_row, "Total Inactive (est.)", "#ef4444")
+        card_o, self.t_overtime_sv = make_total(totals_row, "Total Overtime", "#3b82f6")
         card_a.pack(side="left", fill="x", expand=True, padx=(0, 6))
         card_i.pack(side="left", fill="x", expand=True, padx=6)
         card_o.pack(side="left", fill="x", expand=True, padx=(6, 0))
 
         # Table area
-        table_wrap = ctk.CTkFrame(
-            hist_body, corner_radius=12, fg_color=CARD_BG)
+        table_wrap = ctk.CTkFrame(hist_body, corner_radius=12, fg_color=CARD_BG)
         table_wrap.pack(fill="both", expand=True, padx=8, pady=4)
 
         cols = ("username", "email", "event", "occurred_at", "active_duration")
-        self.tree_hist = ttk.Treeview(
-            table_wrap, columns=cols, show="headings")
+        self.tree_hist = ttk.Treeview(table_wrap, columns=cols, show="headings")
         headers = {
             "username": "username", "email": "email", "event": "event",
             "occurred_at": "occurred_at", "active_duration": "active_duration"
         }
         for c in cols:
             self.tree_hist.heading(c, text=headers[c])
-            self.tree_hist.column(c, width=170 if c not in (
-                "email", "occurred_at") else 240, anchor="w")
+            self.tree_hist.column(c, width=170 if c not in ("email", "occurred_at") else 240, anchor="w")
         self.tree_hist.pack(fill="both", expand=True, padx=6, pady=6)
 
         # tag style for inactive events
-        self.tree_hist.tag_configure(
-            "inactive_row", background=INACTIVE_ROW_BG)
+        self.tree_hist.tag_configure("inactive_row", background=INACTIVE_ROW_BG)
 
         # initial load
         self._hist_reload()
@@ -932,34 +928,32 @@ class DetailDialog(ctk.CTkToplevel):
         # Screenshots (simple columns: taken_at, url)
         scr_card = ctk.CTkFrame(tab_media, corner_radius=12, fg_color=CARD_BG)
         scr_card.pack(fill="both", expand=True, padx=8, pady=(8, 4))
-        ctk.CTkLabel(scr_card, text="Screenshots", font=ctk.CTkFont(
-            size=14, weight="bold")).pack(anchor="w", padx=10, pady=(10, 0))
+        ctk.CTkLabel(scr_card, text="Screenshots", font=ctk.CTkFont(size=14, weight="bold"))\
+            .pack(anchor="w", padx=10, pady=(10, 0))
 
-        self.tree_scr = ttk.Treeview(scr_card, columns=(
-            "taken_at", "url"), show="headings", height=8)
+        self.tree_scr = ttk.Treeview(scr_card, columns=("taken_at", "url"), show="headings", height=8)
         self.tree_scr.heading("taken_at", text="taken_at")
         self.tree_scr.heading("url", text="url")
         self.tree_scr.column("taken_at", width=220, anchor="w")
         self.tree_scr.column("url", width=600, anchor="w")
         self.tree_scr.pack(fill="both", expand=True, padx=10, pady=(6, 6))
-        ctk.CTkButton(scr_card, text="Open selected", command=self.open_selected_screenshot).pack(
-            anchor="e", padx=10, pady=(0, 10))
+        ctk.CTkButton(scr_card, text="Open selected", command=self.open_selected_screenshot)\
+            .pack(anchor="e", padx=10, pady=(0, 10))
 
         # Recordings (simple columns: recorded_at, url)
         rec_card = ctk.CTkFrame(tab_media, corner_radius=12, fg_color=CARD_BG)
         rec_card.pack(fill="both", expand=True, padx=8, pady=(4, 8))
-        ctk.CTkLabel(rec_card, text="Recordings", font=ctk.CTkFont(
-            size=14, weight="bold")).pack(anchor="w", padx=10, pady=(10, 0))
+        ctk.CTkLabel(rec_card, text="Recordings", font=ctk.CTkFont(size=14, weight="bold"))\
+            .pack(anchor="w", padx=10, pady=(10, 0))
 
-        self.tree_rec = ttk.Treeview(rec_card, columns=(
-            "recorded_at", "url"), show="headings", height=8)
+        self.tree_rec = ttk.Treeview(rec_card, columns=("recorded_at", "url"), show="headings", height=8)
         self.tree_rec.heading("recorded_at", text="recorded_at")
         self.tree_rec.heading("url", text="url")
         self.tree_rec.column("recorded_at", width=220, anchor="w")
         self.tree_rec.column("url", width=600, anchor="w")
         self.tree_rec.pack(fill="both", expand=True, padx=10, pady=(6, 6))
-        ctk.CTkButton(rec_card, text="Open selected", command=self.open_selected_recording).pack(
-            anchor="e", padx=10, pady=(0, 10))
+        ctk.CTkButton(rec_card, text="Open selected", command=self.open_selected_recording)\
+            .pack(anchor="e", padx=10, pady=(0, 10))
 
         # load media
         self._reload_media()
@@ -969,10 +963,26 @@ class DetailDialog(ctk.CTkToplevel):
         nb.add(tab_update, text="Update")
 
         fresh = get_user_by_id(self.user_id) or {}
-        ctk.CTkLabel(tab_update, text="Update User", font=ctk.CTkFont(
-            size=16, weight="bold")).pack(anchor="w", padx=12, pady=(12, 0))
-        ctk.CTkButton(tab_update, text="Open Update Form", command=lambda: self._open_update_then_refresh(nb, tab_update))\
-            .pack(anchor="w", padx=12, pady=(8, 12))
+        ctk.CTkLabel(tab_update, text="Update User", font=ctk.CTkFont(size=16, weight="bold"))\
+            .pack(anchor="w", padx=12, pady=(12, 0))
+        ctk.CTkButton(
+            tab_update,
+            text="Open Update Form",
+            command=lambda: self._open_update_then_refresh(nb, tab_update)
+        ).pack(anchor="w", padx=12, pady=(8, 12))
+
+    # ---- NEW: refresh overview labels from DB ----
+    def _refresh_overview_labels(self):
+        try:
+            fresh = get_user_by_id(self.user_id) or {}
+        except Exception:
+            fresh = {}
+        self.over_name_lbl.configure(text=f"Name: {fresh.get('name') or ''}")
+        self.over_user_lbl.configure(text=f"Username: @{fresh.get('username') or ''}")
+        self.over_dept_lbl.configure(text=f"Department: {fresh.get('department') or ''}")
+        st = (fresh.get("status") or "").lower()
+        status_color = {"active": "#22c55e", "inactive": "#ef4444", "off": "#000000"}.get(st, None)
+        self.over_status_lbl.configure(text=f"Status: {st}", text_color=status_color)
 
     def _delete_user_confirm(self):
         if not messagebox.askyesno("Confirm", "Delete this user? This cannot be undone."):
@@ -995,11 +1005,9 @@ class DetailDialog(ctk.CTkToplevel):
         elif p == "Month":
             start = today.replace(day=1)
             if start.month == 12:
-                end = start.replace(year=start.year+1,
-                                    month=1, day=1) - timedelta(days=1)
+                end = start.replace(year=start.year+1, month=1, day=1) - timedelta(days=1)
             else:
-                end = start.replace(month=start.month+1,
-                                    day=1) - timedelta(days=1)
+                end = start.replace(month=start.month+1, day=1) - timedelta(days=1)
         else:
             s = self.v_start.get().strip() or None
             e = self.v_end.get().strip() or None
@@ -1017,8 +1025,7 @@ class DetailDialog(ctk.CTkToplevel):
             self.tree_hist.delete(i)
 
         start, end = self._compute_dates()
-        rows = fetch_user_inactive_history(
-            self.user_id, start, end, limit=1500)
+        rows = fetch_user_inactive_history(self.user_id, start, end, limit=1500)
 
         total_active = 0
         INACTIVITY_THRESHOLD = 10
@@ -1029,8 +1036,7 @@ class DetailDialog(ctk.CTkToplevel):
             total_active += ad
             vals = (r["username"], r["email"], r["event_type"],
                     str(r["occurred_at"]), seconds_to_hhmmss(ad))
-            tag = "inactive_row" if (
-                r.get("event_type") or "").lower() == "inactive" else ""
+            tag = "inactive_row" if (r.get("event_type") or "").lower() == "inactive" else ""
             self.tree_hist.insert("", "end", values=vals, tags=(tag,))
 
             if (r.get("event_type") or "").lower() == "inactive":
@@ -1051,13 +1057,11 @@ class DetailDialog(ctk.CTkToplevel):
 
         scrs = fetch_screenshots_for_user(self.user_id, limit=200)
         for s in scrs:
-            self.tree_scr.insert("", "end", values=(
-                str(s["taken_at"]), s["url"]))
+            self.tree_scr.insert("", "end", values=(str(s["taken_at"]), s["url"]))
 
         recs = fetch_recordings_for_user(self.user_id, limit=100)
         for r in recs:
-            self.tree_rec.insert("", "end", values=(
-                str(r["recorded_at"]), r["url"]))
+            self.tree_rec.insert("", "end", values=(str(r["recorded_at"]), r["url"]))
 
     def open_selected_screenshot(self):
         sel = self.tree_scr.selection()
@@ -1083,10 +1087,18 @@ class DetailDialog(ctk.CTkToplevel):
                 return
             UpdateUserDialog(self, fresh).wait_window()
         finally:
-            # refresh overview text & history/media caches
-            nb.select(current_tab)  # stay on same tab
+            # stay on same tab and refresh this dialog's data
+            nb.select(current_tab)
+            self._refresh_overview_labels()
             self._hist_reload()
             self._reload_media()
+
+            # Also refresh the dashboard cards immediately
+            try:
+                # self.master is AdminDashboardFrame
+                self.master._do_search()
+            except Exception:
+                pass
 
 
 # Launcher
