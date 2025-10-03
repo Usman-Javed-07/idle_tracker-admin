@@ -1,29 +1,105 @@
-import os
-import sys
-import traceback
-import webbrowser
-import tkinter as tk
-from tkinter import ttk, messagebox
-from datetime import datetime, timedelta
-from plyer import notification
-
-# --- UI: CustomTkinter ---
-import customtkinter as ctk
-
+from backend.notify import send_email
+from backend.config import ADMIN_BOOTSTRAP
+from backend.auth import login, admin_create_user, hash_password
 from backend.models import (
     init_tables, list_users, fetch_unnotified_inactive_events, mark_event_notified,
     fetch_user_inactive_history, fetch_screenshots_for_user, fetch_recordings_for_user,
     list_admin_emails,
     admin_update_user, admin_delete_user, fetch_overtime_sum, get_user_by_id,
 )
-from backend.auth import login, admin_create_user, hash_password
-from backend.config import ADMIN_BOOTSTRAP
-from backend.notify import send_email
+import os
+import sys
+import traceback
+import webbrowser
+import tkinter as tk
+from tkinter import ttk, messagebox, filedialog
+from datetime import datetime, timedelta
+from plyer import notification
+from PIL import Image, ImageOps, ImageDraw
+import io
+import urllib.request
+
+# --- UI: CustomTkinter ---
+import customtkinter as ctk
+
+PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+if PROJECT_ROOT not in sys.path:
+    sys.path.insert(0, PROJECT_ROOT)
+
 
 try:
     from backend.config import ALERT_RECIPIENTS
 except Exception:
     ALERT_RECIPIENTS = []
+
+# ✅ Avatar helpers: use backend.media_server if available, else provide a compatible fallback
+try:
+    # preferred path
+    from backend.media_server import save_user_avatar_from_path, remove_user_avatar
+except Exception:
+    # --- Fallback implementation (uses your backend.config + backend.models) ---
+    import os
+    from shutil import copyfile
+    from uuid import uuid4
+    from urllib.parse import urljoin
+    from backend.config import MEDIA_ROOT, MEDIA_BASE_URL
+    try:
+        from backend.config import MEDIA_AVATARS_DIR
+    except Exception:
+        MEDIA_AVATARS_DIR = os.path.join(MEDIA_ROOT, "avatars")
+
+    def _ensure_media_dirs():
+        os.makedirs(MEDIA_ROOT, exist_ok=True)
+        os.makedirs(MEDIA_AVATARS_DIR, exist_ok=True)
+
+    def save_user_avatar_from_path(user_id: int, file_path: str) -> str:
+        """
+        Copies the picked image to MEDIA_AVATARS_DIR, generates a public URL,
+        writes users.image_url via admin_update_user, and returns the URL.
+        """
+        _ensure_media_dirs()
+        ext = os.path.splitext(file_path)[1].lower() or ".png"
+        fname = f"user_{user_id}_{uuid4().hex}{ext}"
+        dest_path = os.path.join(MEDIA_AVATARS_DIR, fname)
+        copyfile(file_path, dest_path)
+
+        # Make a URL relative to MEDIA_ROOT and join with MEDIA_BASE_URL
+        rel = os.path.relpath(dest_path, MEDIA_ROOT).replace("\\", "/")
+        public_url = urljoin(MEDIA_BASE_URL.rstrip("/") + "/", rel)
+
+        try:
+            admin_update_user(user_id, image_url=public_url)
+        except Exception:
+            # not fatal for UI; the function still returns the URL
+            pass
+        return public_url
+
+    def remove_user_avatar(user_id: int) -> None:
+        """
+        Looks up current users.image_url, deletes the local file if it lives
+        under MEDIA_ROOT, then clears users.image_url.
+        """
+        _ensure_media_dirs()
+
+        try:
+            u = get_user_by_id(user_id) or {}
+            url = (u.get("image_url") or "").strip()
+            if url and url.startswith(MEDIA_BASE_URL.rstrip("/") + "/"):
+                rel = url[len(MEDIA_BASE_URL.rstrip("/") + "/"):].lstrip("/")
+                local_path = os.path.join(MEDIA_ROOT, rel.replace("/", os.sep))
+                if os.path.isfile(local_path):
+                    try:
+                        os.remove(local_path)
+                    except Exception:
+                        pass
+        except Exception:
+            pass
+
+        try:
+            admin_update_user(user_id, image_url=None)
+        except Exception:
+            pass
+
 
 REFRESH_MS = 2000
 
@@ -58,6 +134,89 @@ if sys.platform.startswith("win"):
             APP_AUMID)
     except Exception:
         pass
+# Helper: avatar image utils
+
+
+def _circle_crop(img: Image.Image, size=(96, 96)) -> Image.Image:
+    img = img.convert("RGBA")
+    img = ImageOps.fit(img, size, Image.LANCZOS)
+    mask = Image.new("L", size, 0)
+    draw = ImageDraw.Draw(mask)
+    draw.ellipse((0, 0, size[0], size[1]), fill=255)
+    img.putalpha(mask)
+    return img
+
+# AVATAR: download or read image, supports http(s) and file paths
+
+
+def _load_pil_from_source(src: str) -> Image.Image | None:
+    if not src:
+        return None
+    try:
+        if src.startswith("http://") or src.startswith("https://"):
+            with urllib.request.urlopen(src, timeout=8) as r:
+                data = r.read()
+            return Image.open(io.BytesIO(data))
+        # local file
+        if os.path.exists(src):
+            return Image.open(src)
+    except Exception:
+        return None
+    return None
+
+# AVATAR: create a default placeholder (initials bubble)
+
+
+def _default_avatar(initials: str = "U", size=(96, 96)) -> Image.Image:
+    bg = "#334155"  # slate-700
+    fg = "#e2e8f0"  # slate-200
+    img = Image.new("RGB", size, bg)
+    mask = Image.new("L", size, 0)
+    draw = ImageDraw.Draw(mask)
+    draw.ellipse((0, 0, size[0], size[1]), fill=255)
+    img.putalpha(mask)
+
+    # draw initials
+    draw = ImageDraw.Draw(img)
+    # heuristic font size
+    s = int(size[0] * 0.38)
+    try:
+        # If you have a TTF available, you can load it; Pillow default may vary
+        from PIL import ImageFont
+        font = ImageFont.truetype("arial.ttf", s)
+    except Exception:
+        from PIL import ImageFont
+        font = ImageFont.load_default()
+
+    tw, th = draw.textbbox((0, 0), initials, font=font)[2:]
+    draw.text(((size[0] - tw) / 2, (size[1] - th) / 2),
+              initials, font=font, fill=fg)
+    return img
+
+# AVATAR: get initials from user dict
+
+
+def _initials_from_user(u: dict) -> str:
+    name = (u.get("name") or "").strip()
+    if not name:
+        name = (u.get("username") or "U").strip()
+    parts = [p for p in name.split() if p]
+    if not parts:
+        return "U"
+    if len(parts) == 1:
+        return parts[0][0:2].upper()
+    return (parts[0][0] + parts[-1][0]).upper()
+
+# AVATAR: build CTkImage for a user
+
+
+def _build_ctk_avatar(u: dict, size=(96, 96)) -> ctk.CTkImage:
+    src = (u.get("image_url") or "").strip()
+    pil = _load_pil_from_source(src)
+    if pil is None:
+        pil = _default_avatar(_initials_from_user(u), size=size)
+    circ = _circle_crop(pil, size=size)
+    return ctk.CTkImage(light_image=circ, dark_image=circ, size=size)
 
 
 def admin_notify(title, message, timeout=5):
@@ -446,38 +605,62 @@ class AdminDashboardFrame(ctk.CTkFrame):
             if info is None:
                 card = ctk.CTkFrame(
                     self.cards_frame, corner_radius=12, fg_color=CARD_BG)
-                top = ctk.CTkFrame(card, fg_color="transparent")
-                top.pack(fill="x", padx=12, pady=10)
+
+                # AVATAR: two-column layout inside card
+                row = ctk.CTkFrame(card, fg_color="transparent")
+                row.pack(fill="x", padx=12, pady=10)
+
+                # left avatar
+                left = ctk.CTkFrame(row, fg_color="transparent")
+                left.pack(side="left", padx=(0, 12))
+                avatar_img = _build_ctk_avatar(u, size=(96, 96))
+                avatar_lbl = ctk.CTkLabel(left, image=avatar_img, text="")
+                avatar_lbl.pack()
+
+                # right details
+                right = ctk.CTkFrame(row, fg_color="transparent")
+                right.pack(side="left", fill="x", expand=True)
+
                 name_lbl = ctk.CTkLabel(
-                    top, text=u["name"] or "", font=ctk.CTkFont(size=14, weight="bold"))
+                    right, text=u["name"] or "", font=ctk.CTkFont(size=14, weight="bold"))
                 name_lbl.pack(anchor="w")
                 user_lbl = ctk.CTkLabel(
-                    top, text=f"@{u['username']}", text_color=MUTED_TX)
+                    right, text=f"@{u['username']}", text_color=MUTED_TX)
                 user_lbl.pack(anchor="w")
                 dept_lbl = ctk.CTkLabel(
-                    top, text=f"Dept: {u['department']}", text_color=MUTED_TX)
+                    right, text=f"Dept: {u['department']}", text_color=MUTED_TX)
                 dept_lbl.pack(anchor="w")
                 status_lbl = ctk.CTkLabel(
-                    top, text=f"Status: {u['status'].lower()}")
-                # color status inline
+                    right, text=f"Status: {u['status'].lower()}")
                 color = {"active": "#22c55e", "inactive": "#ef4444",
                          "off": "#000000"}.get(u["status"].lower(), None)
                 if color:
                     status_lbl.configure(text_color=color)
                 status_lbl.pack(anchor="w", pady=(4, 0))
 
-                # single action: View Details
+                # action row bottom, centered button
                 btn_row = ctk.CTkFrame(card, fg_color="transparent")
                 btn_row.pack(fill="x", padx=12, pady=(6, 12))
-                ctk.CTkButton(btn_row, text="View Details",
-                              command=lambda uid=uid, uname=u["name"] or u["username"]: self.open_details(uid, uname))\
-                    .pack(side="left")
+                ctk.CTkButton(
+                    btn_row,
+                    text="View Details",
+                    command=lambda uid=uid, uname=u["name"] or u["username"]: self.open_details(
+                        uid, uname),
+                    width=160
+                ).pack(anchor="center")  # center
 
-                info = {"frame": card, "name_lbl": name_lbl, "user_lbl": user_lbl,
-                        "dept_lbl": dept_lbl, "status_lbl": status_lbl}
+                info = {
+                    "frame": card,
+                    "avatar_img": avatar_img,     # keep ref!
+                    "avatar_lbl": avatar_lbl,
+                    "name_lbl": name_lbl,
+                    "user_lbl": user_lbl,
+                    "dept_lbl": dept_lbl,
+                    "status_lbl": status_lbl,
+                }
                 self.user_cards[uid] = info
             else:
-                # tiny diffs
+                # tiny diffs + avatar refresh if URL changed
                 name_txt = u["name"] or ""
                 if info["name_lbl"].cget("text") != name_txt:
                     info["name_lbl"].configure(text=name_txt)
@@ -494,6 +677,14 @@ class AdminDashboardFrame(ctk.CTkFrame):
                          "off": "#000000"}.get(u["status"].lower(), None)
                 if color:
                     info["status_lbl"].configure(text_color=color)
+
+                # AVATAR: if image_url changed or missing, rebuild
+                try:
+                    new_img = _build_ctk_avatar(u, size=(96, 96))
+                    info["avatar_img"] = new_img
+                    info["avatar_lbl"].configure(image=new_img)
+                except Exception:
+                    pass
 
             r, c = divmod(idx, cols)
             self.user_cards[uid]["frame"].grid(
@@ -537,8 +728,8 @@ class AdminDashboardFrame(ctk.CTkFrame):
             self.master.auto_refresh_enabled = True
         self._do_search()
 
-# Dialogs (CustomTk versions)
 
+# Dialogs (CustomTk versions)
 
 class CreateUserDialog(ctk.CTkToplevel):
     def __init__(self, master):
@@ -549,8 +740,8 @@ class CreateUserDialog(ctk.CTkToplevel):
         self.configure(fg_color=BAR_BG)
 
         # Wider default size + guardrails
-        self.geometry("200x360")
-        self.minsize(340, 560)
+        self.geometry("320x600")
+        self.minsize(380, 600)
 
         p = ctk.CTkFrame(self, corner_radius=12, fg_color=CARD_BG)
         p.pack(fill="both", expand=True, padx=16, pady=16)
@@ -565,6 +756,10 @@ class CreateUserDialog(ctk.CTkToplevel):
         self.v_password2 = tk.StringVar()
         self.v_shift_start = tk.StringVar(value="09:00:00")
         self.v_shift_end = tk.StringVar(value="18:00:00")
+
+        # AVATAR: store temp picked file and preview
+        self.v_avatar_path = tk.StringVar(value="")
+        self._avatar_preview_img = None  # keep CTkImage reference
 
         # keep entry widgets for highlighting/focus
         self.inputs = {}
@@ -587,10 +782,20 @@ class CreateUserDialog(ctk.CTkToplevel):
         row("Department", self.v_dept, "dept")
         row("Email", self.v_email, "email")
         row("Password", self.v_password, "password", is_pwd=True)
-        row("Confirm Password", self.v_password2,
-            "password2", is_pwd=True)  # NEW field
+        row("Confirm Password", self.v_password2, "password2", is_pwd=True)
         row("Shift Start (HH:MM:SS)", self.v_shift_start, "shift_start")
         row("Shift End (HH:MM:SS)", self.v_shift_end, "shift_end")
+
+        # AVATAR: picker + preview
+        avatar_row = ctk.CTkFrame(p, fg_color="transparent")
+        avatar_row.pack(fill="x", pady=(8, 4))
+        ctk.CTkLabel(avatar_row, text="Avatar (optional)").pack(side="left")
+        ctk.CTkButton(avatar_row, text="Choose Image",
+                      command=self._pick_avatar, width=120).pack(side="right")
+
+        # preview
+        self.avatar_preview = ctk.CTkLabel(p, text="")
+        self.avatar_preview.pack(pady=(0, 6))
 
         ctk.CTkButton(p, text="Create", command=self.do_create,
                       height=40).pack(pady=12, fill="x")
@@ -603,15 +808,53 @@ class CreateUserDialog(ctk.CTkToplevel):
         sw, sh = self.winfo_screenwidth(), self.winfo_screenheight()
         self.geometry(f"{w}x{h}+{(sw//2 - w//2)}+{(sh//2 - h//2)}")
 
-    # highlight helper
+    # ---- helpers ----
     def _mark_error(self, entry: ctk.CTkEntry):
+        """Show a red border briefly, then restore to a neutral color."""
         try:
             entry.configure(border_color="#ef4444", border_width=2)
-            self.after(1500, lambda: entry.configure(
-                border_color="transparent", border_width=1))
+
+            def _restore():
+                try:
+                    entry.configure(border_color=(
+                        "#D1D5DB", "#374151"), border_width=1)
+                except Exception:
+                    pass
+            self.after(1500, _restore)
         except Exception:
             pass
 
+    @staticmethod
+    def _circle_crop(pil_img: Image.Image, size=(96, 96)) -> Image.Image:
+        pil_img = pil_img.convert("RGBA")
+        pil_img = ImageOps.fit(pil_img, size, Image.LANCZOS)
+        mask = Image.new("L", size, 0)
+        draw = ImageDraw.Draw(mask)
+        draw.ellipse((0, 0, size[0], size[1]), fill=255)
+        pil_img.putalpha(mask)
+        return pil_img
+
+    # ---- avatar picking + preview ----
+    def _pick_avatar(self):
+        path = filedialog.askopenfilename(
+            title="Select Avatar Image",
+            filetypes=[
+                ("Image Files", "*.png;*.jpg;*.jpeg;*.webp;*.gif"), ("All Files", "*.*")]
+        )
+        if not path:
+            return
+        self.v_avatar_path.set(path)
+        try:
+            pil = Image.open(path)
+            circ = self._circle_crop(pil, size=(96, 96))
+            img = ctk.CTkImage(
+                light_image=circ, dark_image=circ, size=(96, 96))
+            self._avatar_preview_img = img
+            self.avatar_preview.configure(image=img, text="")
+        except Exception as e:
+            messagebox.showerror("Avatar", f"Could not load image: {e}")
+
+    # ---- creation logic ----
     def do_create(self):
         # Trimmed values
         vals = {
@@ -652,6 +895,7 @@ class CreateUserDialog(ctk.CTkToplevel):
             return
 
         try:
+            # Create user with your existing backend call
             admin_create_user(
                 vals["username"][0],
                 vals["name"][0],
@@ -661,95 +905,192 @@ class CreateUserDialog(ctk.CTkToplevel):
                 shift_start_time=vals["shift_start"][0],
                 shift_end_time=vals["shift_end"][0],
             )
+
+            # If avatar picked, attach it to the newly created user
+            picked = self.v_avatar_path.get().strip()
+            if picked:
+                try:
+                    # Find the just-created user by exact username
+                    created = list_users(
+                        search=vals["username"][0], status=None, hide_admin=True) or []
+                    target = None
+                    for u in created:
+                        if u.get("username") == vals["username"][0]:
+                            target = u
+                            break
+                    if not target and created:
+                        target = created[0]
+
+                    if target:
+                        url = save_user_avatar_from_path(target["id"], picked)
+                        # force-write image_url in case helper didn't persist it
+                        try:
+                            admin_update_user(target["id"], image_url=url)
+                        except Exception:
+                            pass
+                except Exception as e:
+                    print("Avatar save error (create):", e)
+
             messagebox.showinfo("Done", "User created")
             self.destroy()
         except Exception as e:
             messagebox.showerror("Error", str(e))
 
 
+def _mark_error(self, entry: ctk.CTkEntry):
+    try:
+        entry.configure(border_color="#ef4444", border_width=2)
+
+        def _restore():
+            try:
+                entry.configure(border_color=(
+                    "#D1D5DB", "#374151"), border_width=1)
+            except Exception:
+                pass
+        self.after(1500, _restore)
+    except Exception:
+        pass
+
+
 class UpdateUserDialog(ctk.CTkToplevel):
-    def __init__(self, master, urow):
+    def __init__(self, master, user: dict):
         super().__init__(master)
-        self.title("Update User")
+        self.title(f"Update User — @{user.get('username')}")
         self.grab_set()
-        # allow resize so entries can stretch horizontally
         self.resizable(True, True)
         self.configure(fg_color=BAR_BG)
 
-        # wider default size + sensible minimums
-        self.geometry("200x350")
-        self.minsize(340, 560)
+        self.user = user
+        self.geometry("360x640")
+        self.minsize(380, 640)
 
-        p = ctk.CTkFrame(self, corner_radius=12, fg_color=CARD_BG)
-        p.pack(fill="both", expand=True, padx=16, pady=16)
-        p.configure(width=740)
+        # OUTER CARD
+        card = ctk.CTkFrame(self, corner_radius=12, fg_color=CARD_BG)
+        card.pack(fill="both", expand=True, padx=16, pady=16)
+        card.configure(width=720)
 
-        self.user_id = urow["id"]
-        self.v_name = tk.StringVar(value=urow.get("name") or "")
-        self.v_dept = tk.StringVar(value=urow.get("department") or "")
-        self.v_email = tk.StringVar(value=urow.get("email") or "")
-        self.v_username = tk.StringVar(value=urow.get("username") or "")
+        # SCROLLABLE BODY to avoid layout conflicts/overflow
+        p = ctk.CTkScrollableFrame(card, fg_color="transparent")
+        p.pack(fill="both", expand=True)
+
+        # vars (pre-fill with existing)
+        self.v_username = tk.StringVar(value=user.get("username", ""))
+        self.v_name = tk.StringVar(value=user.get("name", ""))
+        self.v_dept = tk.StringVar(value=user.get("department", ""))
+        self.v_email = tk.StringVar(value=user.get("email", ""))
+        self.v_status = tk.StringVar(value=(user.get("status") or "active"))
         self.v_shift_start = tk.StringVar(
-            value=str(urow.get("shift_start_time") or "09:00:00"))
+            value=user.get("shift_start_time") or "09:00:00")
         self.v_shift_end = tk.StringVar(
-            value=str(urow.get("shift_end_time") or "18:00:00"))
+            value=user.get("shift_end_time") or "18:00:00")
+
+        # password (optional; leave blank to keep)
         self.v_pass1 = tk.StringVar(value="")
         self.v_pass2 = tk.StringVar(value="")
 
-        def row(label, var, is_pwd=False):
-            ctk.CTkLabel(p, text=label).pack(anchor="w", pady=(6, 0))
-            ctk.CTkEntry(
-                p,
+        # AVATAR: path for replacement
+        self.v_avatar_path = tk.StringVar(value="")
+        self._avatar_preview_img = None
+
+        # Header / Avatar preview
+        header = ctk.CTkFrame(p, fg_color="transparent")
+        header.pack(fill="x", pady=(6, 10))
+        ctk.CTkLabel(header, text="Current Avatar / Preview").pack(anchor="w")
+
+        curr = _build_ctk_avatar(user, size=(96, 96))
+        self.avatar_preview = ctk.CTkLabel(header, image=curr, text="")
+        self.avatar_preview.pack(pady=(4, 6))
+
+        # helper to build rows
+        def row(parent, label, var, readonly=False, is_pwd=False, ph=None, show_label=True):
+            if show_label:
+                ctk.CTkLabel(parent, text=label).pack(anchor="w", pady=(4, 0))
+            e = ctk.CTkEntry(
+                parent,
                 textvariable=var,
+                height=38,
                 show="•" if is_pwd else None,
-                placeholder_text=label,
-                height=38
-            ).pack(fill="x")
+                placeholder_text=ph or label
+            )
+            if readonly:
+                e.configure(state="readonly")
+            e.pack(fill="x")
+            return e
 
-        row("Name", self.v_name)
-        row("Department", self.v_dept)
-        row("Email", self.v_email)
-        row("Username", self.v_username)
-        row("Shift Start (HH:MM:SS)", self.v_shift_start)
-        row("Shift End (HH:MM:SS)", self.v_shift_end)
+        row(p, "Username", self.v_username, readonly=True)
+        row(p, "Name", self.v_name)
+        row(p, "Department", self.v_dept)
+        row(p, "Email", self.v_email)
+        row(p, "Shift Start (HH:MM:SS)", self.v_shift_start)
+        row(p, "Shift End (HH:MM:SS)", self.v_shift_end)
 
+        # Password section (single labels; avoid duplicates)
         ctk.CTkLabel(p, text="New Password (leave blank to keep)").pack(
             anchor="w", pady=(10, 0))
-        ctk.CTkEntry(p, textvariable=self.v_pass1, show="•",
-                     placeholder_text="New Password", height=38).pack(fill="x")
+        row(p, "New Password", self.v_pass1, is_pwd=True,
+            ph="New Password", show_label=False)
         ctk.CTkLabel(p, text="Confirm Password").pack(anchor="w", pady=(6, 0))
-        ctk.CTkEntry(p, textvariable=self.v_pass2, show="•",
-                     placeholder_text="Confirm Password", height=38).pack(fill="x")
+        row(p, "Confirm Password", self.v_pass2, is_pwd=True,
+            ph="Confirm Password", show_label=False)
 
-        ctk.CTkButton(p, text="Save", command=self.do_save,
+        # AVATAR: choose/clear
+        avatar_row = ctk.CTkFrame(p, fg_color="transparent")
+        avatar_row.pack(fill="x", pady=(10, 2))
+        ctk.CTkButton(avatar_row, text="Choose New Avatar",
+                      command=self._pick_avatar, width=160).pack(side="left")
+        ctk.CTkButton(avatar_row, text="Remove Avatar",
+                      command=self._remove_avatar, width=140).pack(side="right")
+
+        # save
+        ctk.CTkButton(p, text="Save Changes", command=self._save,
                       height=40).pack(pady=12, fill="x")
 
-        # center after geometry is applied
         self.after(10, self._center)
 
     def _center(self):
         self.update_idletasks()
         w, h = self.winfo_width(), self.winfo_height()
         sw, sh = self.winfo_screenwidth(), self.winfo_screenheight()
-        x = (sw // 2) - (w // 2)
-        y = (sh // 2) - (h // 2)
-        # keep current width/height; just move to center
-        self.geometry(f"{w}x{h}+{x}+{y}")
+        self.geometry(f"{w}x{h}+{(sw//2 - w//2)}+{(sh//2 - h//2)}")
 
-    def do_save(self):
+    def _pick_avatar(self):
+        path = filedialog.askopenfilename(
+            title="Select New Avatar Image",
+            filetypes=[
+                ("Image Files", "*.png;*.jpg;*.jpeg;*.webp;*.gif"), ("All Files", "*.*")]
+        )
+        if not path:
+            return
+        self.v_avatar_path.set(path)
         try:
-            name = self.v_name.get().strip()
-            dept = self.v_dept.get().strip()
-            email = self.v_email.get().strip()
-            username = self.v_username.get().strip()
-            shift_start = self.v_shift_start.get().strip()
-            shift_end = self.v_shift_end.get().strip()
+            pil = Image.open(path)
+            circ = _circle_crop(pil, size=(96, 96))
+            img = ctk.CTkImage(
+                light_image=circ, dark_image=circ, size=(96, 96))
+            self._avatar_preview_img = img
+            self.avatar_preview.configure(image=img)
+        except Exception as e:
+            messagebox.showerror("Avatar", f"Could not load image: {e}")
+
+    def _remove_avatar(self):
+        try:
+            remove_user_avatar(self.user["id"])
+            img = _build_ctk_avatar(
+                {"name": self.v_name.get(), "username": self.v_username.get(),
+                 "image_url": ""},
+                size=(96, 96)
+            )
+            self._avatar_preview_img = img
+            self.avatar_preview.configure(image=img)
+            messagebox.showinfo("Avatar", "Avatar removed.")
+        except Exception as e:
+            messagebox.showerror("Avatar", str(e))
+
+    def _save(self):
+        try:
+            # validate optional password
             p1 = (self.v_pass1.get() or "").strip()
             p2 = (self.v_pass2.get() or "").strip()
-
-            if not username:
-                messagebox.showerror("Validation", "Username cannot be empty.")
-                return
             if p1 or p2:
                 if p1 != p2:
                     messagebox.showerror(
@@ -760,21 +1101,28 @@ class UpdateUserDialog(ctk.CTkToplevel):
                         "Validation", "Password must be at least 6 characters.")
                     return
 
-            payload = dict(
-                name=name,
-                department=dept,
-                email=email,
-                username=username,
-                shift_start_time=shift_start,
-                shift_end_time=shift_end,
+            # Update core fields
+            admin_update_user(
+                self.user["id"],
+                name=self.v_name.get().strip(),
+                department=self.v_dept.get().strip(),
+                email=self.v_email.get().strip(),
+                status=self.v_status.get().strip(),
+                shift_start_time=self.v_shift_start.get().strip(),
+                shift_end_time=self.v_shift_end.get().strip(),
+                **({"password_hash": hash_password(p1)} if p1 else {})
             )
-            if p1:
-                payload["password_hash"] = hash_password(p1)
 
-            admin_update_user(self.user_id, **payload)
-            messagebox.showinfo("Success", "User updated successfully.")
+            # Avatar update if chosen
+            picked = self.v_avatar_path.get().strip()
+            if picked:
+                try:
+                    save_user_avatar_from_path(self.user["id"], picked)
+                except Exception as e:
+                    print("Avatar save error (update):", e)
+
+            messagebox.showinfo("Done", "User updated")
             self.destroy()
-
         except Exception as e:
             messagebox.showerror("Error", str(e))
 
@@ -812,7 +1160,8 @@ class DetailDialog(ctk.CTkToplevel):
         over_card.pack(fill="x", padx=10, pady=10)
 
         # Keep label references so we can update them later
-        self.over_name_lbl = ctk.CTkLabel(over_card, text=f"Name: {fresh.get('name') or ''}")
+        self.over_name_lbl = ctk.CTkLabel(
+            over_card, text=f"Name: {fresh.get('name') or ''}")
         self.over_name_lbl.pack(anchor="w", padx=12, pady=(10, 0))
 
         self.over_user_lbl = ctk.CTkLabel(
@@ -826,8 +1175,10 @@ class DetailDialog(ctk.CTkToplevel):
         self.over_dept_lbl.pack(anchor="w", padx=12, pady=(0, 10))
 
         st = (fresh.get("status") or "").lower()
-        status_color = {"active": "#22c55e", "inactive": "#ef4444", "off": "#000000"}.get(st, None)
-        self.over_status_lbl = ctk.CTkLabel(over_card, text=f"Status: {st}", text_color=status_color)
+        status_color = {"active": "#22c55e",
+                        "inactive": "#ef4444", "off": "#000000"}.get(st, None)
+        self.over_status_lbl = ctk.CTkLabel(
+            over_card, text=f"Status: {st}", text_color=status_color)
         self.over_status_lbl.pack(anchor="w", padx=12, pady=(0, 10))
 
         # Actions row (the 4 buttons live here)
@@ -850,7 +1201,8 @@ class DetailDialog(ctk.CTkToplevel):
         hist_body.pack(fill="both", expand=True, padx=8, pady=8)
 
         # Sidebar filters
-        side = ctk.CTkFrame(hist_body, width=260, corner_radius=12, fg_color=SIDEBAR_BG)
+        side = ctk.CTkFrame(hist_body, width=260,
+                            corner_radius=12, fg_color=SIDEBAR_BG)
         side.pack(side="left", fill="y", padx=(0, 8))
         side.pack_propagate(False)
 
@@ -873,8 +1225,10 @@ class DetailDialog(ctk.CTkToplevel):
 
         btns = ctk.CTkFrame(side, fg_color="transparent")
         btns.pack(anchor="w", padx=12, pady=(8, 12))
-        ctk.CTkButton(btns, text="Search", command=self._hist_reload).pack(side="left", padx=(0, 6))
-        ctk.CTkButton(btns, text="Clear", command=self._hist_clear).pack(side="left")
+        ctk.CTkButton(btns, text="Search", command=self._hist_reload).pack(
+            side="left", padx=(0, 6))
+        ctk.CTkButton(btns, text="Clear",
+                      command=self._hist_clear).pack(side="left")
 
         # Totals strip
         totals = ctk.CTkFrame(hist_body, fg_color="transparent")
@@ -884,39 +1238,48 @@ class DetailDialog(ctk.CTkToplevel):
             card = ctk.CTkFrame(parent, corner_radius=12, fg_color=CARD_BG)
             inner = ctk.CTkFrame(card, fg_color="transparent")
             inner.pack(fill="x", padx=14, pady=10)
-            ctk.CTkLabel(inner, text=label, text_color=MUTED_TX).pack(anchor="w")
+            ctk.CTkLabel(inner, text=label,
+                         text_color=MUTED_TX).pack(anchor="w")
             value_sv = tk.StringVar(value="00:00:00")
-            lbl = ctk.CTkLabel(inner, textvariable=value_sv, font=ctk.CTkFont(size=16, weight="bold"))
+            lbl = ctk.CTkLabel(inner, textvariable=value_sv,
+                               font=ctk.CTkFont(size=16, weight="bold"))
             lbl.configure(text_color=color)
             lbl.pack(anchor="w")
             return card, value_sv
 
         totals_row = ctk.CTkFrame(totals, fg_color="transparent")
         totals_row.pack(fill="x")
-        card_a, self.t_active_sv = make_total(totals_row, "Total Active", "#10b981")
-        card_i, self.t_inactive_sv = make_total(totals_row, "Total Inactive (est.)", "#ef4444")
-        card_o, self.t_overtime_sv = make_total(totals_row, "Total Overtime", "#3b82f6")
+        card_a, self.t_active_sv = make_total(
+            totals_row, "Total Active", "#10b981")
+        card_i, self.t_inactive_sv = make_total(
+            totals_row, "Total Inactive (est.)", "#ef4444")
+        card_o, self.t_overtime_sv = make_total(
+            totals_row, "Total Overtime", "#3b82f6")
         card_a.pack(side="left", fill="x", expand=True, padx=(0, 6))
         card_i.pack(side="left", fill="x", expand=True, padx=6)
         card_o.pack(side="left", fill="x", expand=True, padx=(6, 0))
 
         # Table area
-        table_wrap = ctk.CTkFrame(hist_body, corner_radius=12, fg_color=CARD_BG)
+        table_wrap = ctk.CTkFrame(
+            hist_body, corner_radius=12, fg_color=CARD_BG)
         table_wrap.pack(fill="both", expand=True, padx=8, pady=4)
 
         cols = ("username", "email", "event", "occurred_at", "active_duration")
-        self.tree_hist = ttk.Treeview(table_wrap, columns=cols, show="headings")
+        self.tree_hist = ttk.Treeview(
+            table_wrap, columns=cols, show="headings")
         headers = {
             "username": "username", "email": "email", "event": "event",
             "occurred_at": "occurred_at", "active_duration": "active_duration"
         }
         for c in cols:
             self.tree_hist.heading(c, text=headers[c])
-            self.tree_hist.column(c, width=170 if c not in ("email", "occurred_at") else 240, anchor="w")
+            self.tree_hist.column(c, width=170 if c not in (
+                "email", "occurred_at") else 240, anchor="w")
         self.tree_hist.pack(fill="both", expand=True, padx=6, pady=6)
 
         # tag style for inactive events
-        self.tree_hist.tag_configure("inactive_row", background=INACTIVE_ROW_BG)
+        self.tree_hist.tag_configure(
+            "inactive_row", background=INACTIVE_ROW_BG)
 
         # initial load
         self._hist_reload()
@@ -931,7 +1294,8 @@ class DetailDialog(ctk.CTkToplevel):
         ctk.CTkLabel(scr_card, text="Screenshots", font=ctk.CTkFont(size=14, weight="bold"))\
             .pack(anchor="w", padx=10, pady=(10, 0))
 
-        self.tree_scr = ttk.Treeview(scr_card, columns=("taken_at", "url"), show="headings", height=8)
+        self.tree_scr = ttk.Treeview(scr_card, columns=(
+            "taken_at", "url"), show="headings", height=8)
         self.tree_scr.heading("taken_at", text="taken_at")
         self.tree_scr.heading("url", text="url")
         self.tree_scr.column("taken_at", width=220, anchor="w")
@@ -946,7 +1310,8 @@ class DetailDialog(ctk.CTkToplevel):
         ctk.CTkLabel(rec_card, text="Recordings", font=ctk.CTkFont(size=14, weight="bold"))\
             .pack(anchor="w", padx=10, pady=(10, 0))
 
-        self.tree_rec = ttk.Treeview(rec_card, columns=("recorded_at", "url"), show="headings", height=8)
+        self.tree_rec = ttk.Treeview(rec_card, columns=(
+            "recorded_at", "url"), show="headings", height=8)
         self.tree_rec.heading("recorded_at", text="recorded_at")
         self.tree_rec.heading("url", text="url")
         self.tree_rec.column("recorded_at", width=220, anchor="w")
@@ -978,11 +1343,15 @@ class DetailDialog(ctk.CTkToplevel):
         except Exception:
             fresh = {}
         self.over_name_lbl.configure(text=f"Name: {fresh.get('name') or ''}")
-        self.over_user_lbl.configure(text=f"Username: @{fresh.get('username') or ''}")
-        self.over_dept_lbl.configure(text=f"Department: {fresh.get('department') or ''}")
+        self.over_user_lbl.configure(
+            text=f"Username: @{fresh.get('username') or ''}")
+        self.over_dept_lbl.configure(
+            text=f"Department: {fresh.get('department') or ''}")
         st = (fresh.get("status") or "").lower()
-        status_color = {"active": "#22c55e", "inactive": "#ef4444", "off": "#000000"}.get(st, None)
-        self.over_status_lbl.configure(text=f"Status: {st}", text_color=status_color)
+        status_color = {"active": "#22c55e",
+                        "inactive": "#ef4444", "off": "#000000"}.get(st, None)
+        self.over_status_lbl.configure(
+            text=f"Status: {st}", text_color=status_color)
 
     def _delete_user_confirm(self):
         if not messagebox.askyesno("Confirm", "Delete this user? This cannot be undone."):
@@ -1005,9 +1374,11 @@ class DetailDialog(ctk.CTkToplevel):
         elif p == "Month":
             start = today.replace(day=1)
             if start.month == 12:
-                end = start.replace(year=start.year+1, month=1, day=1) - timedelta(days=1)
+                end = start.replace(year=start.year+1,
+                                    month=1, day=1) - timedelta(days=1)
             else:
-                end = start.replace(month=start.month+1, day=1) - timedelta(days=1)
+                end = start.replace(month=start.month+1,
+                                    day=1) - timedelta(days=1)
         else:
             s = self.v_start.get().strip() or None
             e = self.v_end.get().strip() or None
@@ -1025,7 +1396,8 @@ class DetailDialog(ctk.CTkToplevel):
             self.tree_hist.delete(i)
 
         start, end = self._compute_dates()
-        rows = fetch_user_inactive_history(self.user_id, start, end, limit=1500)
+        rows = fetch_user_inactive_history(
+            self.user_id, start, end, limit=1500)
 
         total_active = 0
         INACTIVITY_THRESHOLD = 10
@@ -1036,7 +1408,8 @@ class DetailDialog(ctk.CTkToplevel):
             total_active += ad
             vals = (r["username"], r["email"], r["event_type"],
                     str(r["occurred_at"]), seconds_to_hhmmss(ad))
-            tag = "inactive_row" if (r.get("event_type") or "").lower() == "inactive" else ""
+            tag = "inactive_row" if (
+                r.get("event_type") or "").lower() == "inactive" else ""
             self.tree_hist.insert("", "end", values=vals, tags=(tag,))
 
             if (r.get("event_type") or "").lower() == "inactive":
@@ -1057,11 +1430,13 @@ class DetailDialog(ctk.CTkToplevel):
 
         scrs = fetch_screenshots_for_user(self.user_id, limit=200)
         for s in scrs:
-            self.tree_scr.insert("", "end", values=(str(s["taken_at"]), s["url"]))
+            self.tree_scr.insert("", "end", values=(
+                str(s["taken_at"]), s["url"]))
 
         recs = fetch_recordings_for_user(self.user_id, limit=100)
         for r in recs:
-            self.tree_rec.insert("", "end", values=(str(r["recorded_at"]), r["url"]))
+            self.tree_rec.insert("", "end", values=(
+                str(r["recorded_at"]), r["url"]))
 
     def open_selected_screenshot(self):
         sel = self.tree_scr.selection()
