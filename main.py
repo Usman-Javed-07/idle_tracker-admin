@@ -1149,6 +1149,10 @@ class DetailDialog(ctk.CTkToplevel):
         self.user_id = user_id
         self.configure(fg_color=APP_BG)
 
+        # NEW: keep an auto-refresh job handle
+        self._hist_auto_job = None
+        self._media_tick = 0  # refresh media less frequently
+
         # Tabs
         nb = ttk.Notebook(self)
         nb.pack(fill="both", expand=True, padx=6, pady=6)
@@ -1350,22 +1354,55 @@ class DetailDialog(ctk.CTkToplevel):
             command=lambda: self._open_update_then_refresh(nb, tab_update)
         ).pack(anchor="w", padx=12, pady=(8, 12))
 
-    # ---- NEW: refresh overview labels from DB ----
+        # ========= NEW: start auto-refresh loop (History + Overview + Media cadence) =========
+        # will refresh while this dialog is open
+        self._media_tick = 0
+        self._hist_auto_job = None
+        self._schedule_hist_autorefresh()
+        # cancel the timer when dialog is destroyed
+        self.bind("<Destroy>", lambda _e: self._cancel_hist_autorefresh())
+
+    # ---- NEW: periodic auto-refresh for History/Overview/Media ----
+    def _schedule_hist_autorefresh(self):
+        """Refresh History totals/table + Overview labels every 2s, Media every ~10s."""
+        def _tick():
+            try:
+                # History totals + table (this also updates overtime via fetch_overtime_sum)
+                self._hist_reload()
+                # Overview labels (status/name/etc.) from DB
+                self._refresh_overview_labels()
+                # Media less frequently to avoid heavy IO
+                self._media_tick = (self._media_tick + 1) % 5  # every ~10s if tick is 2s
+                if self._media_tick == 0:
+                    self._reload_media()
+            except Exception:
+                # swallow errors to keep the loop alive
+                pass
+            finally:
+                self._hist_auto_job = self.after(2000, _tick)  # 2s cadence
+        # kick it off
+        self._hist_auto_job = self.after(2000, _tick)
+
+    def _cancel_hist_autorefresh(self):
+        try:
+            if getattr(self, "_hist_auto_job", None):
+                self.after_cancel(self._hist_auto_job)
+        except Exception:
+            pass
+        self._hist_auto_job = None
+
+    # ---- refresh overview labels from DB ----
     def _refresh_overview_labels(self):
         try:
             fresh = get_user_by_id(self.user_id) or {}
         except Exception:
             fresh = {}
         self.over_name_lbl.configure(text=f"Name: {fresh.get('name') or ''}")
-        self.over_user_lbl.configure(
-            text=f"Username: @{fresh.get('username') or ''}")
-        self.over_dept_lbl.configure(
-            text=f"Department: {fresh.get('department') or ''}")
+        self.over_user_lbl.configure(text=f"Username: @{fresh.get('username') or ''}")
+        self.over_dept_lbl.configure(text=f"Department: {fresh.get('department') or ''}")
         st = (fresh.get("status") or "").lower()
-        status_color = {"active": "#22c55e",
-                        "inactive": "#ef4444", "off": "#000000"}.get(st, None)
-        self.over_status_lbl.configure(
-            text=f"Status: {st}", text_color=status_color)
+        status_color = {"active": "#22c55e", "inactive": "#ef4444", "off": "#000000"}.get(st, None)
+        self.over_status_lbl.configure(text=f"Status: {st}", text_color=status_color)
 
     def _delete_user_confirm(self):
         if not messagebox.askyesno("Confirm", "Delete this user? This cannot be undone."):
@@ -1377,7 +1414,6 @@ class DetailDialog(ctk.CTkToplevel):
         except Exception as e:
             messagebox.showerror("Error", str(e))
 
-    
     def _compute_dates(self):
         # Use Asia/Karachi to derive Day/Week/Month ranges
         today = datetime.now(SHIFT_TZ).date()  # <-- TZ fix
@@ -1390,17 +1426,15 @@ class DetailDialog(ctk.CTkToplevel):
         elif p == "Month":
             start = today.replace(day=1)
             if start.month == 12:
-                end = start.replace(year=start.year+1,
-                                    month=1, day=1) - timedelta(days=1)
+                end = start.replace(year=start.year + 1, month=1, day=1) - timedelta(days=1)
             else:
-                end = start.replace(month=start.month+1,
-                                    day=1) - timedelta(days=1)
+                end = start.replace(month=start.month + 1, day=1) - timedelta(days=1)
         else:
             s = self.v_start.get().strip() or None
             e = self.v_end.get().strip() or None
             return (s, e)
         return (str(start), str(end))
-    
+
     # ---- History tab logic ----
     def _hist_clear(self):
         self.v_period.set("Custom")
@@ -1409,16 +1443,16 @@ class DetailDialog(ctk.CTkToplevel):
         self._hist_reload()
 
     def _hist_reload(self):
+        # clear table
         for i in self.tree_hist.get_children():
             self.tree_hist.delete(i)
 
         start, end = self._compute_dates()
-        rows = fetch_user_inactive_history(
-            self.user_id, start, end, limit=1500)
+        rows = fetch_user_inactive_history(self.user_id, start, end, limit=1500)
 
-        # exact totals
-        total_active = 0            # sum of durations on 'inactive' events (= active streaks that ended)
-        total_inactive = 0          # sum of durations on 'active' events (= inactive streaks that ended)
+        # exact totals from events
+        total_active = 0     # sum of durations on 'inactive' events (= active streaks that ended)
+        total_inactive = 0   # sum of durations on 'active' events (= inactive streaks that ended)
 
         for r in rows:
             ad = int(r.get("active_duration_seconds") or 0)
@@ -1429,21 +1463,21 @@ class DetailDialog(ctk.CTkToplevel):
             elif ev == "active":
                 total_inactive += ad
 
-            vals = (r["username"], r["email"], r["event_type"],
-                    str(r["occurred_at"]), seconds_to_hhmmss(ad))
+            vals = (r["username"], r["email"], r["event_type"], str(r["occurred_at"]), seconds_to_hhmmss(ad))
             tag = "inactive_row" if ev == "inactive" else ""
             self.tree_hist.insert("", "end", values=vals, tags=(tag,))
 
+        # update totals strip
         self.t_active_sv.set(seconds_to_hhmmss(total_active))
         self.t_inactive_sv.set(seconds_to_hhmmss(total_inactive))
         self.t_total_sv.set(seconds_to_hhmmss(total_active + total_inactive))
 
-        # NEW: show overtime for this user and period (already computed before; now displayed)
+        # NEW: overtime sum for this user & period
         ot_sum = fetch_overtime_sum(self.user_id, start, end)
         self.t_overtime_sv.set(seconds_to_hhmmss(int(ot_sum)))
-        
 
     def _reload_media(self):
+        # screenshots
         for i in getattr(self, "tree_scr").get_children():
             self.tree_scr.delete(i)
         for i in getattr(self, "tree_rec").get_children():
@@ -1451,13 +1485,11 @@ class DetailDialog(ctk.CTkToplevel):
 
         scrs = fetch_screenshots_for_user(self.user_id, limit=200)
         for s in scrs:
-            self.tree_scr.insert("", "end", values=(
-                str(s["taken_at"]), s["url"]))
+            self.tree_scr.insert("", "end", values=(str(s["taken_at"]), s["url"]))
 
         recs = fetch_recordings_for_user(self.user_id, limit=100)
         for r in recs:
-            self.tree_rec.insert("", "end", values=(
-                str(r["recorded_at"]), r["url"]))
+            self.tree_rec.insert("", "end", values=(str(r["recorded_at"]), r["url"]))
 
     def open_selected_screenshot(self):
         sel = self.tree_scr.selection()
@@ -1488,13 +1520,13 @@ class DetailDialog(ctk.CTkToplevel):
             self._refresh_overview_labels()
             self._hist_reload()
             self._reload_media()
-
             # Also refresh the dashboard cards immediately
             try:
                 # self.master is AdminDashboardFrame
                 self.master._do_search()
             except Exception:
                 pass
+
 
 
 # Launcher
