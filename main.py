@@ -19,6 +19,13 @@ from PIL import Image, ImageOps, ImageDraw
 import io
 import urllib.request
 
+try:
+    from zoneinfo import ZoneInfo
+    SHIFT_TZ = ZoneInfo("Asia/Karachi")
+except Exception:
+    import pytz
+    SHIFT_TZ = pytz.timezone("Asia/Karachi")
+
 # --- UI: CustomTkinter ---
 import customtkinter as ctk
 
@@ -701,7 +708,7 @@ class AdminDashboardFrame(ctk.CTkFrame):
             u.get("status") or "").lower() == "inactive")
 
         # Overtime today total across visible users
-        today = datetime.now().date()
+        today = datetime.now(SHIFT_TZ).date()  # <-- TZ fix
         start = str(today)
         end = str(today)
         overtime_total = 0
@@ -1233,7 +1240,7 @@ class DetailDialog(ctk.CTkToplevel):
         # Totals strip
         totals = ctk.CTkFrame(hist_body, fg_color="transparent")
         totals.pack(side="top", fill="x", padx=8, pady=(0, 6))
-
+        
         def make_total(parent, label, color):
             card = ctk.CTkFrame(parent, corner_radius=12, fg_color=CARD_BG)
             inner = ctk.CTkFrame(card, fg_color="transparent")
@@ -1252,12 +1259,13 @@ class DetailDialog(ctk.CTkToplevel):
         card_a, self.t_active_sv = make_total(
             totals_row, "Total Active", "#10b981")
         card_i, self.t_inactive_sv = make_total(
-            totals_row, "Total Inactive (est.)", "#ef4444")
-        card_o, self.t_overtime_sv = make_total(
-            totals_row, "Total Overtime", "#3b82f6")
+            totals_row, "Total Inactive", "#ef4444")   # label fixed
+        card_tot, self.t_total_sv = make_total(
+            totals_row, "Today Total", "#111827")
         card_a.pack(side="left", fill="x", expand=True, padx=(0, 6))
         card_i.pack(side="left", fill="x", expand=True, padx=6)
-        card_o.pack(side="left", fill="x", expand=True, padx=(6, 0))
+        card_tot.pack(side="left", fill="x", expand=True, padx=(6, 0))
+        
 
         # Table area
         table_wrap = ctk.CTkFrame(
@@ -1363,8 +1371,10 @@ class DetailDialog(ctk.CTkToplevel):
         except Exception as e:
             messagebox.showerror("Error", str(e))
 
+    
     def _compute_dates(self):
-        today = datetime.now().date()
+        # Use Asia/Karachi to derive Day/Week/Month ranges
+        today = datetime.now(SHIFT_TZ).date()  # <-- TZ fix
         p = self.v_period.get()
         if p == "Day":
             start = end = today
@@ -1384,7 +1394,8 @@ class DetailDialog(ctk.CTkToplevel):
             e = self.v_end.get().strip() or None
             return (s, e)
         return (str(start), str(end))
-
+    
+    # ---- History tab logic ----
     def _hist_clear(self):
         self.v_period.set("Custom")
         self.v_start.set("")
@@ -1399,28 +1410,31 @@ class DetailDialog(ctk.CTkToplevel):
         rows = fetch_user_inactive_history(
             self.user_id, start, end, limit=1500)
 
-        total_active = 0
-        INACTIVITY_THRESHOLD = 10
-        inactive_est = 0
+        # New: exact totals
+        total_active = 0            # sum of durations on 'inactive' events
+        total_inactive = 0          # sum of durations on 'active' events
 
         for r in rows:
             ad = int(r.get("active_duration_seconds") or 0)
-            total_active += ad
+            ev = (r.get("event_type") or "").lower()
+
+            if ev == "inactive":
+                total_active += ad
+            elif ev == "active":
+                total_inactive += ad
+
             vals = (r["username"], r["email"], r["event_type"],
                     str(r["occurred_at"]), seconds_to_hhmmss(ad))
-            tag = "inactive_row" if (
-                r.get("event_type") or "").lower() == "inactive" else ""
+            tag = "inactive_row" if ev == "inactive" else ""
             self.tree_hist.insert("", "end", values=vals, tags=(tag,))
 
-            if (r.get("event_type") or "").lower() == "inactive":
-                inactive_est += INACTIVITY_THRESHOLD
-
         self.t_active_sv.set(seconds_to_hhmmss(total_active))
-        self.t_inactive_sv.set(seconds_to_hhmmss(inactive_est))
+        self.t_inactive_sv.set(seconds_to_hhmmss(total_inactive))
+        self.t_total_sv.set(seconds_to_hhmmss(total_active + total_inactive))
 
         # Overtime sum for this user in range
         ot_sum = fetch_overtime_sum(self.user_id, start, end)
-        self.t_overtime_sv.set(seconds_to_hhmmss(ot_sum))
+        
 
     def _reload_media(self):
         for i in getattr(self, "tree_scr").get_children():
