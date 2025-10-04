@@ -1259,12 +1259,18 @@ class DetailDialog(ctk.CTkToplevel):
         card_a, self.t_active_sv = make_total(
             totals_row, "Total Active", "#10b981")
         card_i, self.t_inactive_sv = make_total(
-            totals_row, "Total Inactive", "#ef4444")   # label fixed
+            totals_row, "Total Inactive", "#ef4444")
         card_tot, self.t_total_sv = make_total(
             totals_row, "Today Total", "#111827")
+        # NEW: overtime in period
+        card_ot, self.t_overtime_sv = make_total(
+            totals_row, "Overtime (period)", "#3b82f6")
+
         card_a.pack(side="left", fill="x", expand=True, padx=(0, 6))
         card_i.pack(side="left", fill="x", expand=True, padx=6)
-        card_tot.pack(side="left", fill="x", expand=True, padx=(6, 0))
+        card_tot.pack(side="left", fill="x", expand=True, padx=6)
+        card_ot.pack(side="left", fill="x", expand=True, padx=(6, 0))
+
         
 
         # Table area
@@ -1410,9 +1416,9 @@ class DetailDialog(ctk.CTkToplevel):
         rows = fetch_user_inactive_history(
             self.user_id, start, end, limit=1500)
 
-        # New: exact totals
-        total_active = 0            # sum of durations on 'inactive' events
-        total_inactive = 0          # sum of durations on 'active' events
+        # exact totals
+        total_active = 0            # sum of durations on 'inactive' events (= active streaks that ended)
+        total_inactive = 0          # sum of durations on 'active' events (= inactive streaks that ended)
 
         for r in rows:
             ad = int(r.get("active_duration_seconds") or 0)
@@ -1432,8 +1438,9 @@ class DetailDialog(ctk.CTkToplevel):
         self.t_inactive_sv.set(seconds_to_hhmmss(total_inactive))
         self.t_total_sv.set(seconds_to_hhmmss(total_active + total_inactive))
 
-        # Overtime sum for this user in range
+        # NEW: show overtime for this user and period (already computed before; now displayed)
         ot_sum = fetch_overtime_sum(self.user_id, start, end)
+        self.t_overtime_sv.set(seconds_to_hhmmss(int(ot_sum)))
         
 
     def _reload_media(self):
